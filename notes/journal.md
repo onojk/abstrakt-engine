@@ -44,3 +44,11 @@
 - One platform first (Android), evaluate iOS after MVP
 - Pace: ~1 hour per session, 4-5 sessions per week
 
+
+## Naming decision (May 4, 2026, end of day)
+
+- Local folder stays as `MyFistApp` (typo kept; Android Studio project structure references it)
+- GitHub repo published as `abstrakt-engine`
+- Framing: this is the rendering engine for the Abstrakt visualizer family
+- Future: visualizers plug into the engine; UI shell wraps the engine
+- Sister project: [onojk/abstrakt](https://github.com/onojk/abstrakt) (Python pipeline)
