@@ -199,7 +199,7 @@ fun WaveformView() {
 }
 
 @Composable
-private fun WaveformCanvas(
+internal fun WaveformCanvas(
     audioFile: AudioFile,
     playbackFraction: Float,
     modifier: Modifier = Modifier,
