@@ -297,9 +297,9 @@ The chassis shipped with 2 painters. The architecture supports unlimited painter
 - One platform first (Android), evaluate iOS after MVP.
 - Pace varies. Marathon sessions are fine when intentional. Three sessions in one calendar day is allowed; forcing energy that isn't there is not.
 
-### Late-session addendum: slice 7c kaleido attempt
+### Late-session addendum: slice 7c kaleido — shipped
 
-Slice 7c (12-wedge kaleido overlay on Cyclone) was attempted at session end. v1 produced 12-fold symmetry but no relationship to cylinder content — the sampling math (`theta * 8 + r * 4`) generated a synthetic phase pattern that the kaleido folded, ignoring the painter FBO. v2 with `u_cyclone_angle` as the front-facing anchor was conceptually correct but compressed each wedge to ~4% of FBO width (`theta / (2π)`), making the mandala render as a near-uniform color tint that disappeared into the cylinder underneath. Reverted to bae17ba (slice 7b painter chassis). Tomorrow: dial `thetaU` multiplier (proposed v3 was ~12.0 to span ~50% of FBO per wedge) and eyes-on tune. The frontU anchor is the correct architecture; only the multiplier is wrong.
+Slice 7c (12-wedge kaleido overlay on Cyclone) was attempted, shelved, and resumed within the same session. v1 produced 12-fold symmetry but no relationship to cylinder content — the sampling math (`theta * 8 + r * 4`) generated a synthetic phase pattern that the kaleido folded, ignoring the painter FBO. v2 with `u_cyclone_angle` as the front-facing anchor was conceptually correct but compressed each wedge to ~4% of FBO width (`theta / (2π)`), making the mandala render as a near-uniform color tint that disappeared into the cylinder underneath. v3 = v2 + multiplier of 12.0 on `thetaU`, spanning ~50% of FBO per wedge — landed. Eyes-on verified: distinct radial spokes pull recognizable painter content, cylinder silhouette visible at edges, motion synced with rotation. The `frontU` anchor was the correct architecture; only the multiplier needed tuning. Cyclone is now feature-complete: cylinder + painter + chassis + kaleido fold.
 
 ---
 
