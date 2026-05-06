@@ -333,6 +333,65 @@ internal object Shaders {
         }
     """.trimIndent()
 
+    // PrintHead painter: regular dot grid, only dots inside a centered circle fire white.
+    // PrintHead painter: jobs cycle every 5s, each job picks a deterministic random center.
+    // The cylinder chassis paints one stripe per frame at the rear angle; successive frames
+    // within a job write the same circle pattern, so the circle rolls onto the cylinder
+    // surface over ~30s (one full revolution). Audio uniforms ignored.
+    // FBO aspect is 4:1; aspect correction uses vec2(4,1) for a pixel-space circle.
+    val PAINTER_PRINTHEAD_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        uniform float u_time;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        const float JOB_DURATION  = 5.0;
+        const float CIRCLE_RADIUS = 0.18;  // aspect-corrected units (≈46px radius)
+        const float GRID_SIZE     = 16.0;  // dot spacing in FBO pixels
+        const float DOT_SIZE      = 1.5;   // dot radius in FBO pixels
+
+        // Cheap hash: input float → [0..1].
+        float hash11(float n) {
+            return fract(sin(n * 12.9898 + 78.233) * 43758.5453);
+        }
+
+        void main() {
+            vec2 fboSize = vec2(1024.0, 256.0);
+            vec2 px      = v_uv * fboSize;
+
+            // Current job: increments every JOB_DURATION seconds.
+            float jobIndex = floor(u_time / JOB_DURATION);
+
+            // Deterministic random center per job.
+            // X: full FBO width; Y: constrained to [0.3..0.7] to avoid clipping at top/bottom.
+            float cx = hash11(jobIndex * 1.0);
+            float cy = 0.3 + hash11(jobIndex * 1.7) * 0.4;
+            vec2 center = vec2(cx, cy);
+
+            // Snap pixel to nearest grid cell center.
+            vec2 gridPx = floor(px / GRID_SIZE) * GRID_SIZE + GRID_SIZE * 0.5;
+            vec2 gridUV = gridPx / fboSize;
+
+            // Aspect-correct distance: FBO is 4:1; vec2(4,1) makes the test circular
+            // in pixel space (1 unit = fboSize.y = 256px in both axes).
+            vec2  aspectDelta    = (gridUV - center) * vec2(fboSize.x / fboSize.y, 1.0);
+            float distFromCenter = length(aspectDelta);
+
+            if (distFromCenter >= CIRCLE_RADIUS) {
+                fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                return;
+            }
+
+            // Inside circle: anti-aliased dot at cell center.
+            float distToCell = length(px - gridPx);
+            float dotMask    = 1.0 - smoothstep(DOT_SIZE - 0.5, DOT_SIZE + 0.5, distToCell);
+            fragColor        = vec4(vec3(dotMask), 1.0);
+        }
+    """.trimIndent()
+
     val DRIFT_POLAR_FRAG = """
         #version 300 es
         precision mediump float;
