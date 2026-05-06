@@ -193,6 +193,112 @@ Scrapped the FBO. Bars computed directly in polar coordinates: `r = length(uv �
 
 ---
 
+## Week 1 — Day 4 (May 5, 2026 — late evening session)
+
+### Overview
+
+Session 3 of May 5. Day 3 shipped the GL renderer, Drift, and a working audio-reactive visualizer stack. Day 4 went deeper: built the 3D Cyclone visualizer (slice 7a), then immediately refactored it into a painter chassis (slice 7b) — an architecture that reframes how every future visualizer in this engine gets built.
+
+Session started at 3pm wake-up. "Late evening" by the clock; subjectively a normal working window. Ended with two commits, one revert, and an architectural insight that changes the engine's direction.
+
+### Done — Slice 7a: Cyclone scaffold + painter mechanic
+
+3D rotating cylinder with a rolling painter FBO. Two-pass render: first pass runs a painter fragment shader into a 1024×256 framebuffer at a scissored stripe at the "rear angle" of the cylinder (the face pointing directly away from the camera, guaranteed hidden by back-face culling). Second pass renders the cylinder geometry sampling from that texture.
+
+Key engineering:
+- `CylinderGeometry.kt`: 64-segment triangle strip (130 vertices), interleaved [x,y,z,u,v], seam duplicated at u=0/u=1 with `GL_REPEAT` on S axis for seamless wrap
+- Camera at (0,0,3), perspective 45°, model rotates Y-axis at 2π/30s (one revolution per 30s)
+- `setEGLConfigChooser(8,8,8,8,16,0)`: 16-bit depth buffer allocated at context creation, not at `onSurfaceChanged`
+- Rear angle: `cycloneAngleRad + 3π/2`, not `+ π` (which is the side tangent, not the rear). Wrong value paints the visible face.
+- Scissor stripe is 16px wide at the rear column. When the stripe crosses x=1024, two separate scissored draws handle the wrap.
+- One-time black clear of the FBO in `onSurfaceCreated`. Never cleared in `onDrawFrame` — content persists and accumulates; old paint decays naturally as the cylinder overwrites it after ~30s.
+- FBO texture: `GL_REPEAT` (S axis), `GL_CLAMP_TO_EDGE` (T axis). Wraps horizontally for seamless cylinder seam; clamps vertically to keep top/bottom clean.
+
+Four timed screenshots (t=0, t=10, t=30, t=60s) confirmed rolling and discard cycle working. Committed as `ebf7a74`.
+
+### Done — Slice 7b: Painter chassis
+
+Immediately after shipping 7a, the painter was refactored into a swappable component system.
+
+- `Painter.kt`: `enum class Painter { HUE_STRIPE, AUDIO_PAINT }` plus `PainterEntry` (painter, vert, frag) and `allPainters()` registry. Adding a future painter = one fragment shader file + one entry in `allPainters()`.
+- `PAINTER_HUESTRIPE_FRAG`: renamed from 7a's `PAINTER_FRAG`. Time-driven HSV cycle, vertical brightness gradient, identity-identical behavior to 7a.
+- `PAINTER_AUDIOPAINT_FRAG`: new. `v_uv.x` maps to band index (0–7); hue from band index + slow time drift; brightness from `u_bands[i]` + `u_beat_decay`; saturation at 0.80 base + band amplitude. 8 vertical columns on the cylinder surface, each independent.
+- `AbstraktRenderer`: `painterPrograms: MutableMap<Painter, ShaderProgram>` replaces single `painterProgram`. All painters compiled at `onSurfaceCreated`. Per-frame, `audioUniforms.activePainter` selects which program paints.
+- Full painter contract pushed every frame to every painter: `u_time`, `u_peak`, `u_beat`, `u_beat_decay`, `u_bands[8]`, `u_playback_fraction`. Unused uniforms silently no-op at `loc=-1`. No per-painter branching in the renderer.
+- `AudioUniforms.activePainter`: `@Volatile var activePainter: Painter = Painter.HUE_STRIPE`. Main thread writes on button tap; GL thread reads each frame.
+- `MainActivity`: painter selection row rendered only when `currentViz == Viz.GL_CYCLONE`. Cyan highlight tracks active painter. Hidden for all other modes.
+
+Verified with audio playing: 5–7 distinct columns visibly brightening and shifting across the cylinder front face when audio drives `u_bands`. Committed as `bae17ba`.
+
+### Notable moments / debugging
+
+**Eyes-on discipline failure pattern — three instances.**
+
+This is the behavioral pattern that needs honest documentation because it happened three separate times tonight.
+
+1. After Drift's anchor layer (Day 3 close): the GL pipeline was healthy, ring buffer data differentiated, no errors. The assistant moved toward summary, the user typed "commit," the screenshots got captured anyway only after explicit prompting from one party or the other. Anchor layer was shipped visually unverified, acknowledged by note in the commit message. Emulator screenshots confirmed structure; beat-pulse timing remains untested under live conditions.
+
+2. After Cyclone 7a: screenshots were captured but the assistant moved toward summary rather than presenting them for explicit review. The four timed screenshots were the actual confirmation the rolling mechanic worked — but this required user prompting to execute.
+
+3. After AudioPaint 7b: the assistant described the Audio painter screenshot as showing "8 banded hue columns" with reactivity. User caught this and required actual eyes-on with audio playing before accepting. The confirmed result — 5–7 visible columns shifting with audio content — could not have been determined from a description. It required the user watching the device with audio running.
+
+Day 3's rule was "logcat green ≠ visual works." Day 4 adds: **Claude's screenshot description ≠ visual works either.** A description of what should be visible is not confirmation. The only valid confirmation for a new visualizer is the user looking at it. The only valid confirmation for an audio-reactive feature is the user looking at it with audio playing.
+
+**Painter contract generalization.** The initial 7b plan had painters scissor-locked to "paint only at rear angle." Discussion of PrintHead and Scanline ideas revealed this was too restrictive — those patterns need to paint across arbitrary x positions per frame. The contract was generalized: painter receives the full uniform set and handles its own region-of-interest logic. The scissor at the renderer level remains as a guard but is not the painter's only degree of freedom. This required no refactor — a broader contract and intent documentation were sufficient.
+
+**Drift v2 chartreuse + violet experiment.** Mid-session, Drift's multi-layer ghost stack hit a visual ceiling — translucent layers with scrambled hue assignments average toward gray mush as layers stack. A 2-layer redesign (chartreuse base + violet accent, high saturation, no random hue) was implemented and screencapped. Result was visually clean — no mush — but geometrically too simple; the form didn't change with audio content. Shelved. Shaders.kt reverted via git checkout to last committed state. Lesson: color theory problems and geometric complexity are separate problems. Solving the former doesn't address the latter.
+
+### Architectural insight: painter chassis as engine foundation
+
+The realization from tonight: **every future visualizer in this engine can be driven through the cylinder chassis.**
+
+Cyclone started as "one visualizer." It is now something different. The cylinder is a display surface. Painters are the visualizers. The cylinder (geometry, rotation, projection, FBO, two-pass renderer) stays fixed. Only the painter changes. As stated in the session: "all future visualizers can be driven through this can driver system."
+
+What this unlocks:
+- **PrintHead**: marks down columns at specific x positions on beat timing. Typewriter rolling across the surface.
+- **Scanline**: horizontal sweep across the full texture height, brightness modulated per-band. Oscilloscope on a can.
+- **BeatStrobe**: full-texture white flash on beat, decays to black. No hue, no columns. Pure rhythm.
+- **SpectrumPainter**: spectral waterfall, bands stacked as color rows scrolling upward.
+- **MP4Painter**: `SurfaceTexture` + `GL_TEXTURE_EXTERNAL_OES`. Android renders a playing video into the painter FBO; the cylinder displays it. This connects the Android engine directly to the desktop Abstrakt project's MP4 output — a video rendered in Python runs on the cylinder surface on Android. One entry in `allPainters()`. This bridges two projects that have never shared code. Documented and deferred to slice 8+.
+
+The chassis shipped with 2 painters. The architecture supports unlimited painters without modifying `AbstraktRenderer`.
+
+### Known issues (deferred)
+
+- `AudioAnalyzer` 4-pair-bands bug: still unfixed. Bands 0=1, 2=3, 4=5, 6=7 are identical pairs. AudioPaint's 8-column visual is partially duplicated as a result. Requires real FFT or more distinct windowing to fix.
+- Toggle row UI broken at 5 buttons: "Cyclone" text wraps vertically due to overflow. Painter row below it compounds the top-of-screen crowding. Swipe-gesture visualizer picker is the right replacement.
+- Drift anchor layer unconfirmed on real hardware under audio. Polar structure renders correctly in emulator; beat-pulse brightness and timing require live device with audio.
+- AudioPaint at zero-audio is very dim (val ≈ 0.09–0.25 with no file loaded). Correct behavior, but reads as "broken" before a file is picked.
+
+### Learnings
+
+- **Rear-angle math**: for Y-rotation by α, the rear face is at α + 3π/2, not α + π. α + π is the side tangent (z′ = 0), not the rear (min z′). Wrong formula paints the visible face.
+- **FBO clear discipline**: `glClear` the painter FBO exactly once in `onSurfaceCreated`. Never in `onDrawFrame`. Content must accumulate; clearing on every frame produces an empty cylinder.
+- **Scissor wrap at texture boundary**: when a stripe crosses x=1024, one scissor call is insufficient — it clips at the boundary. Two draws required: one for the right fragment, one for the wrapped-left fragment.
+- **`@Volatile` for painter enum selection**: sufficient because enum reference reads are atomic on JVM. Compound-state changes (painter + associated parameter reset together) would require a lock.
+- **`hsv2rgb` is a compile-unit problem**: GLSL ES has no `#include`. Every painter shader defines its own copy. This is correct; DRY doesn't apply to separate compile units.
+- **Eyes-on with audio playing is the only valid confirmation of audio-reactive behavior.** Screenshots without audio confirm geometry. Screenshots with audio confirm reactivity. Both are required before commit.
+
+### Next candidates
+
+- Add 2–3 more painters: PrintHead, Scanline, BeatStrobe — each estimated ~30 min, single shader file + one `allPainters()` entry
+- MP4Painter: `SurfaceTexture` bridge to desktop Abstrakt MP4 output — larger slice, probably 8+
+- Fix AudioAnalyzer 4-pair-bands bug: real FFT or more distinct windowing, required before AudioPaint's columns mean anything
+- Swipe-gesture visualizer picker: toggle row is visibly broken at 5 buttons, swipe replaces it entirely and scales to unlimited modes
+- Port Echo to GL: unifies the rendering path; enables proper kaleido FBO + cartesian source that genuinely benefits from two-pass
+- MP4 export: original stated goal from Day 1; frame-by-frame GL pipeline is now in place to support it
+
+### Standing rules (updated)
+
+- This is offline, not real-time. Never add `RECORD_AUDIO` or streaming audio capture.
+- Every shipped Android visualizer must have a paired feature/UI.
+- Logcat green is necessary but not sufficient — always eyes-on a new visualizer before committing.
+- **Claude's screenshot description is not confirmation. The only valid confirmation is the user looking at it. For audio-reactive features, audio must be playing.**
+- One platform first (Android), evaluate iOS after MVP.
+- Pace varies. Marathon sessions are fine when intentional. Three sessions in one calendar day is allowed; forcing energy that isn't there is not.
+
+---
+
 ## Naming decision (May 4, 2026, end of day)
 
 - Local folder stays as `MyFistApp` (typo kept; Android Studio project structure references it)
