@@ -11,7 +11,6 @@ import javax.microedition.khronos.opengles.GL10
 
 private const val TAG = "AbstraktGL"
 
-// Fullscreen quad in NDC: two triangles via TRIANGLE_STRIP covering [-1,1]x[-1,1].
 private val QUAD_VERTS = floatArrayOf(
     -1f, -1f,
      1f, -1f,
@@ -19,34 +18,46 @@ private val QUAD_VERTS = floatArrayOf(
      1f,  1f,
 )
 
+private const val WARP_GRID_DIM   = 70f
+private const val WARP_DOT_RADIUS =  6f
+
 internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
     // Audio state — written from main thread, read on GL thread via @Volatile fields inside.
     val audioUniforms = AudioUniforms()
+    private val influencers = Influencers(audioUniforms)
 
-    private var program: ShaderProgram? = null
-    private var vaoId = 0
-    private var vboId = 0
+    // Written from main thread, read on GL thread.
+    @Volatile var glMode: GlVizMode = GlVizMode.TEST
+
+    fun setAudioFile(file: AudioFile?)      { audioUniforms.audioFile        = file }
+    fun setPlaybackFraction(f: Float)       { audioUniforms.playbackFraction = f    }
+
+    private var testProgram: ShaderProgram? = null
+    private var warpProgram: ShaderProgram? = null
+    private var vaoId         = 0
+    private var vboId         = 0
     private var surfaceWidth  = 1
     private var surfaceHeight = 1
     private var startTimeNs   = 0L
-
-    fun setAudioFile(file: AudioFile?)  { audioUniforms.audioFile        = file }
-    fun setPlaybackFraction(f: Float)   { audioUniforms.playbackFraction = f    }
+    private var lastFrameNs   = 0L
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         Log.d(TAG, "onSurfaceCreated — building GL resources")
-        // After EGL context loss the old GPU objects no longer exist — reset IDs only.
-        program = null
-        vaoId   = 0
-        vboId   = 0
+        testProgram = null
+        warpProgram = null
+        vaoId       = 0
+        vboId       = 0
         startTimeNs = 0L
-        audioUniforms.uniformsLogged = false  // re-log locations after context restore
+        lastFrameNs = 0L
+        audioUniforms.uniformsLogged = false
 
         GLES30.glClearColor(0f, 0f, 0f, 1f)
 
-        program = ShaderProgram(Shaders.TEST_VERT, Shaders.TEST_FRAG)
+        testProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.TEST_FRAG)
+        warpProgram = ShaderProgram(Shaders.WARP_VERT, Shaders.WARP_FRAG)
 
+        // Single VAO/VBO — both programs share layout(location=0) in vec2 a_position.
         val vaos = IntArray(1)
         GLES30.glGenVertexArrays(1, vaos, 0)
         vaoId = vaos[0]
@@ -76,7 +87,7 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         GLES30.glBindVertexArray(0)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
 
-        Log.d(TAG, "GL resources ready: vao=$vaoId vbo=$vboId program=${program?.id}")
+        Log.d(TAG, "GL resources ready: vao=$vaoId testProg=${testProgram?.id} warpProg=${warpProgram?.id}")
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
@@ -87,19 +98,35 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        if (startTimeNs == 0L) startTimeNs = System.nanoTime()
-        val timeSec = (System.nanoTime() - startTimeNs) / 1_000_000_000f
+        val nowNs = System.nanoTime()
+        if (startTimeNs == 0L) { startTimeNs = nowNs; lastFrameNs = nowNs }
+        val timeSec = (nowNs - startTimeNs) / 1_000_000_000f
+        val dt      = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceAtMost(0.1f)
+        lastFrameNs = nowNs
 
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
 
-        val prog = program ?: return
-        prog.use()
+        val wW = surfaceWidth.toFloat()
+        val wH = surfaceHeight.toFloat()
 
-        // u_resolution is surface geometry, not audio — set here in the renderer.
-        prog.setVec2("u_resolution", surfaceWidth.toFloat(), surfaceHeight.toFloat())
-
-        // All audio uniforms + u_time set via AudioUniforms bridge.
-        audioUniforms.applyToProgram(prog, timeSec)
+        when (glMode) {
+            GlVizMode.TEST -> {
+                val prog = testProgram ?: return
+                prog.use()
+                prog.setVec2("u_resolution", wW, wH)
+                audioUniforms.applyToProgram(prog, timeSec)
+            }
+            GlVizMode.WARP -> {
+                val prog = warpProgram ?: return
+                prog.use()
+                prog.setVec2("u_resolution", wW, wH)
+                prog.setFloat("u_grid_dim",   WARP_GRID_DIM)
+                prog.setFloat("u_dot_radius", WARP_DOT_RADIUS)
+                audioUniforms.applyToProgram(prog, timeSec)
+                influencers.updateForFrame(timeSec, dt, wW, wH)
+                influencers.applyToProgram(prog)
+            }
+        }
 
         GLES30.glBindVertexArray(vaoId)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)

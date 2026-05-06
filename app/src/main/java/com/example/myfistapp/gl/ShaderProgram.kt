@@ -40,7 +40,14 @@ internal class ShaderProgram(vertSrc: String, fragSrc: String) {
     fun setVec4(name: String, r: Float, g: Float, b: Float, a: Float) =
         GLES30.glUniform4f(GLES30.glGetUniformLocation(id, name), r, g, b, a)
 
-    // Used for uniform arrays (e.g. float u_bands[8]). Skips silently if optimized out.
+    // Used for vec2 uniform arrays (e.g. vec2 u_influencer_pos[5]); values is interleaved x,y.
+    fun setVec2Array(name: String, values: FloatArray) {
+        val loc = GLES30.glGetUniformLocation(id, name)
+        if (loc == -1) return
+        GLES30.glUniform2fv(loc, values.size / 2, values, 0)
+    }
+
+    // Used for float uniform arrays (e.g. float u_bands[8]). Skips silently if optimized out.
     fun setFloatArray(name: String, values: FloatArray) {
         val loc = GLES30.glGetUniformLocation(id, name)
         if (loc == -1) return

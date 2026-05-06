@@ -14,6 +14,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
-    fun setAudioFile(file: AudioFile?)      = renderer.setAudioFile(file)
+    fun setAudioFile(file: AudioFile?)       = renderer.setAudioFile(file)
     fun setPlaybackFraction(fraction: Float) = renderer.setPlaybackFraction(fraction)
+    fun setGlMode(mode: GlVizMode)           { renderer.glMode = mode }
 }

@@ -21,6 +21,10 @@ internal class AudioUniforms {
     // Reset to false in onSurfaceCreated so locations are re-logged after context restore.
     internal var uniformsLogged = false
 
+    fun getSnapshot(): AudioSnapshot =
+        audioFile?.let { snapshotAt(it, playbackFraction) }
+            ?: AudioSnapshot(FloatArray(8), 0f, false)
+
     fun applyToProgram(program: ShaderProgram, timeSec: Float) {
         val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
             ?: AudioSnapshot(FloatArray(8), 0f, false)

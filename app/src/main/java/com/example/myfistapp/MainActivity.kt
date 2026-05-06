@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.loadAndAnalyze
 import com.example.myfistapp.gl.AbstraktGLSurfaceView
+import com.example.myfistapp.gl.GlVizMode
 import com.example.myfistapp.ui.theme.MyFistAppTheme
 import com.example.myfistapp.visualizers.KaleidoscopeCanvas
 import com.example.myfistapp.visualizers.WarpfieldCanvas
@@ -63,6 +64,7 @@ private enum class Viz(val label: String) {
     WARPFIELD("Warp"),
     KALEIDO("Echo"),
     GL_TEST("GL"),
+    GL_WARP("Warp"),   // GL renderer — replaces Compose Warp as the primary warp toggle
 }
 
 class MainActivity : ComponentActivity() {
@@ -143,7 +145,7 @@ private fun VisualizerScreen() {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 48.dp),
+                .padding(horizontal = 16.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -175,9 +177,10 @@ private fun VisualizerScreen() {
 
             Spacer(Modifier.height(12.dp))
 
-            // Visualizer toggle — 4 options, 2dp gaps to fit in one row
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                Viz.entries.forEach { viz ->
+            // Visualizer toggle — Wave | Warp(GL) | Echo | GL.  WARPFIELD is kept in the enum
+            // for Echo's internal WarpfieldCanvas layer but has no top-level button.
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_TEST).forEach { viz ->
                     val active = currentViz == viz
                     Button(
                         onClick = { currentViz = viz },
@@ -228,9 +231,16 @@ private fun VisualizerScreen() {
                             playbackFraction = playbackFraction,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        Viz.GL_TEST -> GlTestCanvas(
+                        Viz.GL_TEST -> GlCanvas(
                             audioFile = audioFile,
                             playbackFraction = playbackFraction,
+                            glMode = GlVizMode.TEST,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_WARP -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.WARP,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -268,9 +278,10 @@ private fun VisualizerScreen() {
 }
 
 @Composable
-private fun GlTestCanvas(
+private fun GlCanvas(
     audioFile: AudioFile?,
     playbackFraction: Float,
+    glMode: GlVizMode,
     modifier: Modifier = Modifier,
 ) {
     val context        = LocalContext.current
@@ -302,9 +313,10 @@ private fun GlTestCanvas(
     AndroidView(
         factory = { glView },
         update = { view ->
-            // Called on every recomposition — pushes latest audio state across the GL thread boundary.
+            // Called on every recomposition — pushes latest audio + mode state to the GL thread.
             view.setAudioFile(audioFile)
             view.setPlaybackFraction(playbackFraction)
+            view.setGlMode(glMode)
         },
         modifier = modifier,
     )
