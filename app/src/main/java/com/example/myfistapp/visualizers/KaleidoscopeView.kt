@@ -20,6 +20,18 @@ import kotlin.math.PI
 private const val SEGMENTS = 12
 private const val ROTATION_SPEED = 0.05f   // rad/s — ~125 s per full revolution
 
+private const val STRINGS_ENABLED = true
+
+private typealias EchoLayer = @Composable (AudioFile?, Float, Modifier) -> Unit
+
+private val warpfieldLayer: EchoLayer = { audioFile, playbackFraction, modifier ->
+    WarpfieldCanvas(audioFile = audioFile, playbackFraction = playbackFraction, modifier = modifier)
+}
+
+private val stringsLayer: EchoLayer = { audioFile, playbackFraction, modifier ->
+    GuitarStringsLayer(audioFile = audioFile, playbackFraction = playbackFraction, modifier = modifier)
+}
+
 @Composable
 fun KaleidoscopeCanvas(
     audioFile: AudioFile?,
@@ -28,6 +40,11 @@ fun KaleidoscopeCanvas(
 ) {
     val shader = remember { RuntimeShader(KALEIDOSCOPE_AGSL) }
     var rotation by remember { mutableFloatStateOf(0f) }
+
+    val layers = remember {
+        if (STRINGS_ENABLED) listOf(warpfieldLayer, stringsLayer)
+        else listOf(warpfieldLayer)
+    }
 
     LaunchedEffect(Unit) {
         var lastNanos = 0L
@@ -43,8 +60,6 @@ fun KaleidoscopeCanvas(
 
     Box(
         modifier = modifier.graphicsLayer {
-            // Reading `rotation` here subscribes this layer to recompose when
-            // rotation changes, refreshing the shader uniform and RenderEffect.
             shader.setIntUniform("segments", SEGMENTS)
             shader.setFloatUniform("rotation", rotation)
             shader.setFloatUniform("resolution", size.width, size.height)
@@ -53,10 +68,8 @@ fun KaleidoscopeCanvas(
                 .asComposeRenderEffect()
         },
     ) {
-        WarpfieldCanvas(
-            audioFile = audioFile,
-            playbackFraction = playbackFraction,
-            modifier = Modifier.fillMaxSize(),
-        )
+        layers.forEach { layer ->
+            layer(audioFile, playbackFraction, Modifier.fillMaxSize())
+        }
     }
 }
