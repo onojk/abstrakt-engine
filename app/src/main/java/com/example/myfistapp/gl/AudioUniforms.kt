@@ -17,6 +17,7 @@ internal class AudioUniforms {
     // Written on main thread, read on GL thread — @Volatile ensures visibility.
     @Volatile var audioFile: AudioFile? = null
     @Volatile var playbackFraction: Float = 0f
+    @Volatile var activePainter: Painter = Painter.HUE_STRIPE
 
     // Reset to false in onSurfaceCreated so locations are re-logged after context restore.
     internal var uniformsLogged = false

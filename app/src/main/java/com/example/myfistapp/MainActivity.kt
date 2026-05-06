@@ -45,6 +45,7 @@ import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.loadAndAnalyze
 import com.example.myfistapp.gl.AbstraktGLSurfaceView
 import com.example.myfistapp.gl.GlVizMode
+import com.example.myfistapp.gl.Painter
 import com.example.myfistapp.ui.theme.MyFistAppTheme
 import com.example.myfistapp.visualizers.KaleidoscopeCanvas
 import com.example.myfistapp.visualizers.WarpfieldCanvas
@@ -87,12 +88,13 @@ private fun VisualizerScreen() {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
 
-    var audioFile       by remember { mutableStateOf<AudioFile?>(null) }
-    var isLoading       by remember { mutableStateOf(false) }
-    var errorMsg        by remember { mutableStateOf<String?>(null) }
-    var isPlaying       by remember { mutableStateOf(false) }
+    var audioFile        by remember { mutableStateOf<AudioFile?>(null) }
+    var isLoading        by remember { mutableStateOf(false) }
+    var errorMsg         by remember { mutableStateOf<String?>(null) }
+    var isPlaying        by remember { mutableStateOf(false) }
     var playbackFraction by remember { mutableStateOf(0f) }
-    var currentViz      by remember { mutableStateOf(Viz.WAVEFORM) }
+    var currentViz       by remember { mutableStateOf(Viz.WAVEFORM) }
+    var activePainter    by remember { mutableStateOf(Painter.HUE_STRIPE) }
 
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
@@ -199,6 +201,28 @@ private fun VisualizerScreen() {
                 }
             }
 
+            if (currentViz == Viz.GL_CYCLONE) {
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Painter.entries.forEach { painter ->
+                        val active = activePainter == painter
+                        Button(
+                            onClick = { activePainter = painter },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (active) NeonCyan else DimBg,
+                            ),
+                        ) {
+                            Text(
+                                text = painter.label,
+                                color = if (active) Color.Black else DimWhite,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(12.dp))
 
             Box(
@@ -248,6 +272,7 @@ private fun VisualizerScreen() {
                             audioFile = audioFile,
                             playbackFraction = playbackFraction,
                             glMode = GlVizMode.CYCLONE,
+                            painter = activePainter,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -289,6 +314,7 @@ private fun GlCanvas(
     audioFile: AudioFile?,
     playbackFraction: Float,
     glMode: GlVizMode,
+    painter: Painter = Painter.HUE_STRIPE,
     modifier: Modifier = Modifier,
 ) {
     val context        = LocalContext.current
@@ -324,6 +350,7 @@ private fun GlCanvas(
             view.setAudioFile(audioFile)
             view.setPlaybackFraction(playbackFraction)
             view.setGlMode(glMode)
+            view.setPainter(painter)
         },
         modifier = modifier,
     )

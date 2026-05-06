@@ -40,7 +40,7 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
     private var warpProgram:    ShaderProgram? = null
     private var driftProgram:   ShaderProgram? = null
     private var cycloneProgram: ShaderProgram? = null
-    private var painterProgram: ShaderProgram? = null
+    private val painterPrograms: MutableMap<Painter, ShaderProgram> = mutableMapOf()
     private var vaoId           = 0
     private var vboId           = 0
     private var cycloneVaoId    = 0
@@ -64,7 +64,7 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         warpProgram     = null
         driftProgram    = null
         cycloneProgram  = null
-        painterProgram  = null
+        painterPrograms.clear()
         vaoId           = 0
         vboId           = 0
         cycloneVaoId    = 0
@@ -84,7 +84,9 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         warpProgram    = ShaderProgram(Shaders.WARP_VERT,    Shaders.WARP_FRAG)
         driftProgram   = ShaderProgram(Shaders.TEST_VERT,    Shaders.DRIFT_POLAR_FRAG)
         cycloneProgram = ShaderProgram(Shaders.CYCLONE_VERT, Shaders.CYCLONE_FRAG)
-        painterProgram = ShaderProgram(Shaders.PAINTER_VERT, Shaders.PAINTER_FRAG)
+        allPainters().forEach { entry ->
+            painterPrograms[entry.painter] = ShaderProgram(entry.vert, entry.frag)
+        }
 
         // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
         val vaos = IntArray(1)
@@ -188,7 +190,8 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
         Log.d(TAG, "GL resources ready: quad vao=$vaoId cyclone vao=$cycloneVaoId " +
             "test=${testProgram?.id} warp=${warpProgram?.id} " +
-            "drift=${driftProgram?.id} cyclone=${cycloneProgram?.id} painter=${painterProgram?.id}")
+            "drift=${driftProgram?.id} cyclone=${cycloneProgram?.id} " +
+            "painters=${painterPrograms.mapValues { it.value.id }}")
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
@@ -291,8 +294,13 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
             }
 
             GlVizMode.CYCLONE -> {
+                val snap  = audioUniforms.getSnapshot()
+                beatDecay = if (snap.isBeat) 1.0f
+                            else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
+                                .coerceAtLeast(0f)
+
                 val cProg = cycloneProgram ?: return
-                val pProg = painterProgram ?: return
+                val pProg = painterPrograms[audioUniforms.activePainter] ?: return
 
                 // Advance rotation: 2π radians per 30 seconds.
                 cycloneAngleRad += dt * (2f * Math.PI.toFloat() / 30f)
@@ -308,7 +316,13 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                 GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
                 GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
                 pProg.use()
+                // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
                 pProg.setFloat("u_time", timeSec)
+                pProg.setFloat("u_peak", snap.peak)
+                pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
+                pProg.setFloat("u_beat_decay", beatDecay)
+                pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
+                pProg.setFloatArray("u_bands", snap.bands)
                 if (endX <= PAINTER_TEX_W) {
                     GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
                     drawQuad()

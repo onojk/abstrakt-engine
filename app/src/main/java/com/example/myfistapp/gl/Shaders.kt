@@ -238,7 +238,7 @@ internal object Shaders {
 
     // Writes a solid hue band (varying with time) + vertical brightness gradient.
     // Hue cycles every 20s so each stripe's age is visually readable.
-    val PAINTER_FRAG = """
+    val PAINTER_HUESTRIPE_FRAG = """
         #version 300 es
         precision mediump float;
         uniform float u_time;
@@ -255,6 +255,35 @@ internal object Shaders {
             float hue = fract(u_time * 0.05);          // full cycle every 20s
             float val = 0.4 + 0.6 * v_uv.y;           // darker bottom, brighter top
             fragColor = vec4(hsv2rgb(vec3(hue, 1.0, val)), 1.0);
+        }
+    """.trimIndent()
+
+    // Audio-reactive painter: 8 frequency bands mapped to 8 vertical color columns.
+    // Each column's hue, brightness, and saturation track its band's energy.
+    val PAINTER_AUDIOPAINT_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform float u_time;
+        uniform float u_peak;
+        uniform float u_beat_decay;
+        uniform float u_bands[8];
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            int   bandIdx = clamp(int(v_uv.x * 8.0), 0, 7);
+            float amp     = u_bands[bandIdx];
+            float hue     = float(bandIdx) / 8.0 + u_time * 0.008;
+            float sat     = 0.80 + amp * 0.20;
+            float val     = (0.25 + amp * 0.65) * (1.0 + u_beat_decay * 0.6)
+                          * (0.35 + 0.65 * v_uv.y);
+            fragColor = vec4(hsv2rgb(vec3(fract(hue), sat, clamp(val, 0.0, 1.0))), 1.0);
         }
     """.trimIndent()
 
