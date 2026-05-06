@@ -303,6 +303,14 @@ Slice 7c (12-wedge kaleido overlay on Cyclone) was attempted, shelved, and resum
 
 ---
 
+### Late-session addendum: PrintHead chassis test + kaleido-monochrome finding
+
+Slice 7d (PrintHead v1, dotted circles, 0f0c42d) was the chassis flexibility test — first painter that breaks all the assumed rolling-painter patterns: doesn't anchor to the rear angle, ignores all audio uniforms, paints geometric shapes rather than continuous color. The chassis accepted it without a single renderer change, and the painter button auto-generated from the registry. Pattern validated for arbitrary future painters.
+
+Architectural finding: the kaleido overlay has an unstated dependency on painter content saturation. The kaleido samples the painter FBO and composites at 0.5 alpha; when the FBO is mostly black (as PrintHead leaves it once it dominates the texture), the fold has nothing to fold and the mandala layer disappears against the dark cylinder. Visible in the t30 capture: PrintHead's dotted circle reads cleanly on the cylinder body, but the 12-fold mandala is invisible. Correct behavior given the chassis architecture, not a bug — but worth knowing. Future painter design implication: painters that contribute meaningfully to the kaleido fold should output non-zero color in most pixels (colored backgrounds, audio-driven hues, dim non-black fills). Painters intended primarily as dot/line geometry on the cylinder body itself (like PrintHead) are valid but degrade the kaleido layer when they dominate the FBO. The chassis does not need changes; this is a content-design rule for the painter family going forward.
+
+---
+
 ## Naming decision (May 4, 2026, end of day)
 
 - Local folder stays as `MyFistApp` (typo kept; Android Studio project structure references it)
