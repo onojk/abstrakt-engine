@@ -37,8 +37,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.loadAndAnalyze
+import com.example.myfistapp.gl.AbstraktGLSurfaceView
 import com.example.myfistapp.ui.theme.MyFistAppTheme
 import com.example.myfistapp.visualizers.KaleidoscopeCanvas
 import com.example.myfistapp.visualizers.WarpfieldCanvas
@@ -57,6 +62,7 @@ private enum class Viz(val label: String) {
     WAVEFORM("Wave"),
     WARPFIELD("Warp"),
     KALEIDO("Echo"),
+    GL_TEST("GL"),
 }
 
 class MainActivity : ComponentActivity() {
@@ -169,8 +175,8 @@ private fun VisualizerScreen() {
 
             Spacer(Modifier.height(12.dp))
 
-            // Visualizer toggle — 3 options, compact spacing so they fit in one row
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Visualizer toggle — 4 options, 2dp gaps to fit in one row
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 Viz.entries.forEach { viz ->
                     val active = currentViz == viz
                     Button(
@@ -222,6 +228,7 @@ private fun VisualizerScreen() {
                             playbackFraction = playbackFraction,
                             modifier = Modifier.fillMaxSize(),
                         )
+                        Viz.GL_TEST -> GlTestCanvas(modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -254,4 +261,38 @@ private fun VisualizerScreen() {
             }
         }
     }
+}
+
+@Composable
+private fun GlTestCanvas(modifier: Modifier = Modifier) {
+    val context        = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Scoped to this composable's lifetime: torn down when user toggles away, fresh on toggle-back.
+    val glView = remember { AbstraktGLSurfaceView(context) }
+
+    DisposableEffect(lifecycleOwner) {
+        // Lifecycle is already RESUMED when this composable first enters composition;
+        // the observer won't fire ON_RESUME retroactively, so kick it manually.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            glView.onResume()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> glView.onResume()
+                Lifecycle.Event.ON_PAUSE  -> glView.onPause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            glView.onPause()   // stop GL thread when composable leaves composition
+        }
+    }
+
+    AndroidView(
+        factory = { glView },
+        modifier = modifier,
+    )
 }
