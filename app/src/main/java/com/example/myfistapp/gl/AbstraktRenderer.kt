@@ -3,6 +3,7 @@ package com.example.myfistapp.gl
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.util.Log
+import com.example.myfistapp.audio.AudioFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.microedition.khronos.egl.EGLConfig
@@ -20,6 +21,9 @@ private val QUAD_VERTS = floatArrayOf(
 
 internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
+    // Audio state — written from main thread, read on GL thread via @Volatile fields inside.
+    val audioUniforms = AudioUniforms()
+
     private var program: ShaderProgram? = null
     private var vaoId = 0
     private var vboId = 0
@@ -27,13 +31,17 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
     private var surfaceHeight = 1
     private var startTimeNs   = 0L
 
+    fun setAudioFile(file: AudioFile?)  { audioUniforms.audioFile        = file }
+    fun setPlaybackFraction(f: Float)   { audioUniforms.playbackFraction = f    }
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         Log.d(TAG, "onSurfaceCreated — building GL resources")
-        // After EGL context loss the old GPU objects no longer exist; just reset IDs.
+        // After EGL context loss the old GPU objects no longer exist — reset IDs only.
         program = null
         vaoId   = 0
         vboId   = 0
         startTimeNs = 0L
+        audioUniforms.uniformsLogged = false  // re-log locations after context restore
 
         GLES30.glClearColor(0f, 0f, 0f, 1f)
 
@@ -62,7 +70,6 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
             GLES30.GL_STATIC_DRAW,
         )
 
-        // attribute location 0 matches layout(location=0) in vertex shader
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
 
@@ -87,8 +94,12 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
         val prog = program ?: return
         prog.use()
-        prog.setFloat("u_time", timeSec)
+
+        // u_resolution is surface geometry, not audio — set here in the renderer.
         prog.setVec2("u_resolution", surfaceWidth.toFloat(), surfaceHeight.toFloat())
+
+        // All audio uniforms + u_time set via AudioUniforms bridge.
+        audioUniforms.applyToProgram(prog, timeSec)
 
         GLES30.glBindVertexArray(vaoId)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)

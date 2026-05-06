@@ -17,11 +17,17 @@ internal object Shaders {
         precision mediump float;
         uniform float u_time;
         uniform vec2  u_resolution;
+        uniform float u_peak;
+        uniform float u_beat;
+        uniform float u_bands[8];
         in vec2 v_uv;
         out vec4 fragColor;
         void main() {
-            float wave = 0.5 + 0.5 * sin(u_time + v_uv.x * 6.28);
-            fragColor = vec4(v_uv.x, v_uv.y, wave, 1.0);
+            float wave = 0.5 + 0.5 * sin(u_time * (2.0 + u_peak * 8.0) + v_uv.x * 6.28);
+            vec3 color = vec3(v_uv.x, v_uv.y, wave);
+            color = mix(color, vec3(1.0), u_beat * 0.4);
+            color *= 0.4 + u_peak * 0.6;
+            fragColor = vec4(color, 1.0);
         }
     """.trimIndent()
 }

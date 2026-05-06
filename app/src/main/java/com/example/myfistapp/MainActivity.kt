@@ -228,7 +228,11 @@ private fun VisualizerScreen() {
                             playbackFraction = playbackFraction,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        Viz.GL_TEST -> GlTestCanvas(modifier = Modifier.fillMaxSize())
+                        Viz.GL_TEST -> GlTestCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -264,7 +268,11 @@ private fun VisualizerScreen() {
 }
 
 @Composable
-private fun GlTestCanvas(modifier: Modifier = Modifier) {
+private fun GlTestCanvas(
+    audioFile: AudioFile?,
+    playbackFraction: Float,
+    modifier: Modifier = Modifier,
+) {
     val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -293,6 +301,11 @@ private fun GlTestCanvas(modifier: Modifier = Modifier) {
 
     AndroidView(
         factory = { glView },
+        update = { view ->
+            // Called on every recomposition — pushes latest audio state across the GL thread boundary.
+            view.setAudioFile(audioFile)
+            view.setPlaybackFraction(playbackFraction)
+        },
         modifier = modifier,
     )
 }
