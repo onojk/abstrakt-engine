@@ -411,7 +411,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 val mvpM   = FloatArray(16)
 
                 Matrix.setIdentityM(modelM, 0)
-                val shakeY = (beatDecay * 0.25f * Math.sin(timeSec * 35.0)).toFloat()
+                val shakeY = (beatDecay * 0.35f * Math.sin(timeSec * 45.0)).toFloat()
                 Matrix.translateM(modelM, 0, 0f, shakeY, 0f)
                 Matrix.rotateM(modelM, 0,
                     Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
