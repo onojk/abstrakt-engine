@@ -311,6 +311,82 @@ Architectural finding: the kaleido overlay has an unstated dependency on painter
 
 ---
 
+## Week 2 — Day 1 (May 6, 2026)
+
+### Overview
+
+Continuation of the Cyclone painter arc. Shipped slice 7f (ImagePainter), resolved a 15+ iteration kaleido tuning arc, and added beat-driven cylinder shake. Two commits pushed: `a47d489` (ImagePainter + kaleido + initial shake) and `7399732` (shake amplitude tune).
+
+### Done — Slice 7f: ImagePainter (4th painter)
+
+- `cyclone_image.jpg` (4096×256) bundled as a raw asset under `app/src/main/assets/`
+- `AbstraktRenderer` constructor changed to accept `Context` so the asset can be opened on the GL thread in `onSurfaceCreated` — safe because `Context.assets` is thread-safe for reads
+- Image decoded via `BitmapFactory` (`inScaled = false` to prevent density scaling) and uploaded via `GLUtils.texImage2D` to texture unit 1
+- `PAINTER_IMAGE_FRAG`: `sourceU = (cyclone_angle / 2π) + v_uv.x × (1024 / image_width)` — one FBO-width window of the image scrolls left with each revolution; at 4096px wide, the image cycles every 4 revolutions (~2 minutes)
+- `GL_REPEAT` on S axis so `sourceU` wraps seamlessly; `GL_CLAMP_TO_EDGE` on T to avoid vertical bleed
+- IMAGE painter binds image texture to unit 1 before the scissored draw, restores unit 0 afterward; no other painter is affected
+
+### Done — Kaleido tuning arc (kfix10–kfix17+)
+
+The kaleido design went through a long iteration arc this session. Root cause of all the intermediate failures was the same structural issue documented in the Day 4 addendum: sampling a 1D-varying texture (horizontal color bands) through a radial fold maps adjacent screen pixels to very different FBO columns, producing visible radial spoke lines. The final design sidesteps this geometrically rather than fighting it with alpha.
+
+**Attempts and what they revealed:**
+
+- `smoothstep(0.75, 0.95, r)` as outer mask (kfix10): first clearly visible mandala structure, but a white/bright halo ring appeared between r=0.417 and r=0.75 from `clamp(radial, 0.0, 1.0)` sampling the FBO top edge
+- `step(r, 0.92)` hard mask (kfix11): halo gone, but `r=0.92` covers the entire portrait viewport — the kaleido filled the screen with no cylinder visible at the edges
+- Fully opaque `fragColor = col` (kfix12): clean full-screen kaleido, confirmed Image painter working distinctly from HueStripe, but cylinder entirely occluded
+- Kaleido-outside + cylinder-through-hole (`1.0 - step(r, 0.55)`, kfix13): works — warm orange kaleido ring around center cylinder window. Revealed the cylinder IS visible through the hole and the Image content reads distinctly
+- White frame + kaleido through circular hole: white everywhere outside `holeRadius`, kaleido inside. First attempt looked solid black inside the hole — FBO only 50% filled at 15s warmup; 35s required for a full revolution at 2π/30s
+- `holeRadius = 0.50` (kfix15): circle exactly full screen width, white shows only in four corners
+- Radial multiplier 2.6 → 2.0 (kfix16): 30% larger/zoomed pattern, spokes visibly wider
+- Radial 2.0 → 1.9, holeRadius 0.52 (kfix17): final state — slightly more zoom, small breathing room at edge
+
+**Final shader design:** `radial = r * 1.9`, `holeRadius = 0.52`, `isInsideHole = step(r, holeRadius)`, `color = mix(vec3(1.0), kaleido.rgb, isInsideHole)`, `fragColor = vec4(color, 1.0)`. White frame outside the circle, kaleido inside, fully opaque. No mask artifacts, no halo, clean hard edge.
+
+**FBO warm-up gotcha:** Screenshots taken at 15s after app launch showed a solid black kaleido window — the painter had only painted ~50% of the FBO (half a revolution). The 35s baseline for any Cyclone screenshot is now established. Screenshots before one full revolution are unreliable for diagnosing kaleido content.
+
+### Done — Beat-driven cylinder shake
+
+- `shakeY = (beatDecay * 0.35f * Math.sin(timeSec * 45.0)).toFloat()` inserted as `Matrix.translateM(modelM, 0, 0f, shakeY, 0f)` immediately before the `rotateM` call
+- On beat: `beatDecay` spikes to 1.0, cylinder jolts ±35% of its height, damps out in ~200ms (τ = 1/5s decay constant)
+- 45 rad/s oscillation ≈ 7 Hz — fast enough to feel like a jolt rather than a sway
+- Kaleido overlay (Pass 3 fullscreen quad) is unaffected by the model matrix — cylinder shakes inside the circular window while the white frame stays fixed. This contrast is what makes the shake readable
+- Requires an audio file loaded and playing. `beatDecay` stays zero without audio; the shake is invisible in no-audio testing
+
+### Notable: Image painter UI tab coordinate fix
+
+Getting a reliable Image painter button tap required a `uiautomator dump` to find exact bounds `[806,734][894,787]` → center (850, 760). The button row was previously being tapped at (211, 189) which was hitting Hue on the scaled screenshot coordinates, not the actual device coordinates. All subsequent painter taps used the dump-verified coordinate.
+
+### Commits
+
+- `a47d489`: slice 7f: ImagePainter + kaleido overlay with beat-shake (5 files, 104 insertions, includes asset)
+- `7399732`: tune: strengthen cylinder beat-shake (0.35f amplitude, 45 rad/s)
+
+### Known issues / deferred
+
+- Beat shake not eyes-on verified with actual audio — `beatDecay` behavior confirmed in code review; live beat trigger under audio untested this session
+- `AudioAnalyzer` 4-pair-bands bug still unfixed — AudioPaint columns are partially duplicated
+- Cyclone button overflow in portrait (vertical text wrap) — swipe picker still deferred
+- `all_code.txt` in repo root is untracked and probably should be gitignored
+
+### Learnings
+
+- **FBO warm-up is 30s minimum for Cyclone.** One full revolution at 2π/30s must complete before any kaleido screenshot is diagnostic. A 15s screenshot is ~50% black FBO — it looks broken even when it's correct.
+- **Kaleido spoke artifacts are structural, not tunable.** Any `thetaU` multiplier > ~1.5 maps adjacent screen pixels to different FBO columns → visible radial lines. The fix is to not fight it — either use a fully opaque kaleido (covers the cylinder) or use the white-frame design that makes the spoke structure irrelevant by clamping the kaleido to a smaller disc where the spokes read as the intended pattern.
+- **`uiautomator dump` is the ground truth for tap coordinates.** Scaled screenshot pixel coordinates are not device coordinates. Get the actual bounds once; don't guess.
+- **The cylinder shake only needs one line of Kotlin.** `translateM` before `rotateM` is sufficient. The translate is in model space, so it moves the cylinder in world space before rotation is applied.
+
+### Next candidates
+
+- Eyes-on beat shake under real audio — confirm `beatDecay` fires visibly with a song playing
+- Fix AudioAnalyzer 4-pair-bands: real FFT (FFTW via JNI, or kissfft) or at minimum 8 genuinely distinct window sizes
+- Swipe picker for visualizer mode — toggle row is broken at 5 buttons
+- Slice 8: BeatStrobe painter — full-texture white flash on beat, simplest possible audio-reactive painter, pure rhythm signal
+- MP4Painter: `SurfaceTexture` bridge to desktop Abstrakt MP4 output (slice 8+ scope)
+- Gitignore `all_code.txt`
+
+---
+
 ## Naming decision (May 4, 2026, end of day)
 
 - Local folder stays as `MyFistApp` (typo kept; Android Studio project structure references it)
