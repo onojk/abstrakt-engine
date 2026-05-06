@@ -40,12 +40,14 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
     private var warpProgram:    ShaderProgram? = null
     private var driftProgram:   ShaderProgram? = null
     private var cycloneProgram: ShaderProgram? = null
+    private var kaleidoProgram: ShaderProgram? = null
     private val painterPrograms: MutableMap<Painter, ShaderProgram> = mutableMapOf()
-    private var vaoId           = 0
-    private var vboId           = 0
-    private var cycloneVaoId    = 0
-    private var cycloneVboId    = 0
-    private var cycloneAngleRad = 0f
+    private var vaoId              = 0
+    private var vboId              = 0
+    private var cycloneVaoId       = 0
+    private var cycloneVboId       = 0
+    private var cycloneAngleRad    = 0f
+    private var kaleidoRotationRad = 0f
     private val cylinderVertexCount = CylinderGeometry.VERTEX_COUNT
     private var painterFBO      = 0
     private var painterTexture  = 0
@@ -60,16 +62,18 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         Log.d(TAG, "onSurfaceCreated — building GL resources")
-        testProgram     = null
-        warpProgram     = null
-        driftProgram    = null
-        cycloneProgram  = null
+        testProgram        = null
+        warpProgram        = null
+        driftProgram       = null
+        cycloneProgram     = null
+        kaleidoProgram     = null
         painterPrograms.clear()
-        vaoId           = 0
-        vboId           = 0
-        cycloneVaoId    = 0
-        cycloneVboId    = 0
-        cycloneAngleRad = 0f
+        vaoId              = 0
+        vboId              = 0
+        cycloneVaoId       = 0
+        cycloneVboId       = 0
+        cycloneAngleRad    = 0f
+        kaleidoRotationRad = 0f
         painterFBO      = 0
         painterTexture  = 0
         fboId           = 0
@@ -84,6 +88,7 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         warpProgram    = ShaderProgram(Shaders.WARP_VERT,    Shaders.WARP_FRAG)
         driftProgram   = ShaderProgram(Shaders.TEST_VERT,    Shaders.DRIFT_POLAR_FRAG)
         cycloneProgram = ShaderProgram(Shaders.CYCLONE_VERT, Shaders.CYCLONE_FRAG)
+        kaleidoProgram = ShaderProgram(Shaders.TEST_VERT,    Shaders.CYCLONE_KALEIDO_FRAG)
         allPainters().forEach { entry ->
             painterPrograms[entry.painter] = ShaderProgram(entry.vert, entry.frag)
         }
@@ -372,9 +377,28 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
 
-                // Restore state for 2D modes.
+                // Depth + cull off — kaleido is a fullscreen quad, ignores depth.
                 GLES30.glDisable(GLES30.GL_DEPTH_TEST)
                 GLES30.glDisable(GLES30.GL_CULL_FACE)
+
+                // ── Pass 3: Kaleido overlay — alpha-blended mandala over cylinder ──
+                val kProg = kaleidoProgram
+                if (kProg != null) {
+                    kaleidoRotationRad += dt * 0.05f
+                    GLES30.glEnable(GLES30.GL_BLEND)
+                    GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+                    kProg.use()
+                    kProg.setInt("u_content", 0)
+                    kProg.setVec2("u_resolution", wW, wH)
+                    kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
+                    kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+                    drawQuad()
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glDisable(GLES30.GL_BLEND)
+                }
+
                 GLES30.glClearColor(0f, 0f, 0f, 1f)
             }
         }

@@ -287,6 +287,52 @@ internal object Shaders {
         }
     """.trimIndent()
 
+    // Fullscreen kaleido overlay for Cyclone — samples painterFBO directly.
+    // Composited over the cylinder at 0.5 alpha via GL_BLEND in the renderer.
+    // u_cyclone_angle anchors the sample to the front-facing cylinder column;
+    // thetaU * 12.0 spans ~50% of FBO width per wedge to show painter variation.
+    val CYCLONE_KALEIDO_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const float PI       = 3.14159265;
+        const int   SEGMENTS = 12;
+
+        uniform sampler2D u_content;          // painter FBO (GL_REPEAT on S)
+        uniform vec2      u_resolution;       // screen pixels
+        uniform float     u_kaleido_rotation; // slow mandala rotation accumulator
+        uniform float     u_cyclone_angle;    // same cycloneAngleRad as the cylinder
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        void main() {
+            float minDim   = min(u_resolution.x, u_resolution.y);
+            vec2  centered = (v_uv * u_resolution - u_resolution * 0.5) / minDim;
+
+            float r     = length(centered);
+            float theta = atan(centered.y, centered.x) + u_kaleido_rotation;
+
+            // Fold into a single mirror-symmetric wedge [0, segAngle/2].
+            float segAngle = 2.0 * PI / float(SEGMENTS);
+            theta = mod(theta, segAngle);
+            if (theta > segAngle * 0.5) theta = segAngle - theta;
+
+            // (r, theta) → painter FBO UV.
+            // frontU: anchors the sample to the front-facing cylinder column.
+            // thetaU * 12.0: spans ~50% of FBO per wedge so spokes show distinct colors.
+            float frontU  = mod(u_cyclone_angle / (2.0 * PI), 1.0);
+            float thetaU  = theta / (2.0 * PI) * 12.0;
+            vec2 sampleUV = vec2(
+                fract(frontU + thetaU),
+                clamp(r * 2.0, 0.0, 1.0)
+            );
+
+            vec4 col  = texture(u_content, sampleUV);
+            fragColor = vec4(col.rgb, 0.5);
+        }
+    """.trimIndent()
+
     val DRIFT_POLAR_FRAG = """
         #version 300 es
         precision mediump float;
