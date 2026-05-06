@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.loadAndAnalyze
 import com.example.myfistapp.ui.theme.MyFistAppTheme
+import com.example.myfistapp.visualizers.KaleidoscopeCanvas
 import com.example.myfistapp.visualizers.WarpfieldCanvas
 import com.example.myfistapp.visualizers.WaveformCanvas
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +53,11 @@ private val NeonCyan  = Color(0xFF00FFFF)
 private val DimWhite  = Color(0x99FFFFFF)
 private val DimBg     = Color(0xFF1A1A2E)
 
-private enum class Viz { WAVEFORM, WARPFIELD }
+private enum class Viz(val label: String) {
+    WAVEFORM("Wave"),
+    WARPFIELD("Warp"),
+    KALEIDO("Echo"),
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,7 +141,7 @@ private fun VisualizerScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "abstrakt / ${currentViz.name.lowercase()}",
+                text = "abstrakt / ${currentViz.label.lowercase()}",
                 color = NeonCyan,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -164,8 +169,8 @@ private fun VisualizerScreen() {
 
             Spacer(Modifier.height(12.dp))
 
-            // Visualizer toggle
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Visualizer toggle — 3 options, compact spacing so they fit in one row
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Viz.entries.forEach { viz ->
                     val active = currentViz == viz
                     Button(
@@ -175,7 +180,7 @@ private fun VisualizerScreen() {
                         ),
                     ) {
                         Text(
-                            text = viz.name.lowercase().replaceFirstChar { it.uppercase() },
+                            text = viz.label,
                             color = if (active) Color.Black else DimWhite,
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 13.sp,
@@ -208,6 +213,11 @@ private fun VisualizerScreen() {
                             Text("No file loaded", color = DimWhite, fontSize = 14.sp)
                         }
                         Viz.WARPFIELD -> WarpfieldCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.KALEIDO -> KaleidoscopeCanvas(
                             audioFile = audioFile,
                             playbackFraction = playbackFraction,
                             modifier = Modifier.fillMaxSize(),

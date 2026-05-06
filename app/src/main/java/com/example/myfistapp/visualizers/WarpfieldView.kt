@@ -27,8 +27,15 @@ import kotlin.math.sqrt
 private const val COLS = 40
 private const val ROWS = 70
 private const val DOT_COUNT = COLS * ROWS
-private const val INF_COUNT = 3
+private const val INF_COUNT = 5
 private const val HUE_BUCKETS = 16
+
+// Per-influencer config: varied orbits, speeds, and initial phases so motion
+// is dense and distributed — one influencer is always near the +x source wedge
+// that the kaleidoscope samples from.
+private val INF_ORBIT = floatArrayOf(0.20f, 0.26f, 0.17f, 0.23f, 0.21f)  // fraction of w/h
+private val INF_SPEED = floatArrayOf(0.10f, 0.07f, 0.13f, 0.06f, 0.11f)  // rad/s
+private val INF_PHASE = floatArrayOf(0f, 1.257f, 2.513f, 3.770f, 5.026f) // 0°,72°,144°,216°,288°
 
 @Composable
 fun WarpfieldCanvas(
@@ -84,16 +91,18 @@ fun WarpfieldCanvas(
             ?: AudioSnapshot(FloatArray(8), 0f, false)
 
         val bf       = beatFlash[0]
-        val infR     = (0.32f + snap.bands[1] * 0.18f) * min(w, h)
-        val strength = 55f + snap.bands[0] * 110f + bf * 70f
+        val infR     = (0.18f + snap.bands[1] * 0.07f) * min(w, h)
+        val strength = 45f + snap.bands[0] * 85f + bf * 65f
         val hueBase  = snap.bands[0] * 200f
 
-        // 3 influencers drift on slow time-based circular paths — no extra state needed
+        // 5 influencers with independent orbits, speeds, and start phases —
+        // ensures at least one is near the +x axis at any given time (the slice
+        // the kaleidoscope samples), giving the mandala continuous motion.
         val ix = FloatArray(INF_COUNT) { k ->
-            w / 2f + cos(tSec * 0.08f * (1f + k * 0.4f) + k * 2.094f) * w * 0.27f
+            w / 2f + cos(tSec * INF_SPEED[k] + INF_PHASE[k]) * w * INF_ORBIT[k]
         }
         val iy = FloatArray(INF_COUNT) { k ->
-            h / 2f + sin(tSec * 0.08f * (1f + k * 0.4f) + k * 2.094f) * h * 0.27f
+            h / 2f + sin(tSec * INF_SPEED[k] + INF_PHASE[k]) * h * INF_ORBIT[k]
         }
 
         for (b in 0 until HUE_BUCKETS) bucketPts[b].clear()
