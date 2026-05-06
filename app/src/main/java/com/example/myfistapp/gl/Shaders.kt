@@ -287,10 +287,7 @@ internal object Shaders {
         }
     """.trimIndent()
 
-    // Fullscreen kaleido overlay for Cyclone — samples painterFBO directly.
-    // Composited over the cylinder at 0.5 alpha via GL_BLEND in the renderer.
-    // u_cyclone_angle anchors the sample to the front-facing cylinder column;
-    // thetaU * 12.0 spans ~50% of FBO width per wedge to show painter variation.
+    // CYCLONE_KALEIDO_FRAG — White frame + 5% more zoomed kaleidoscope
     val CYCLONE_KALEIDO_FRAG = """
         #version 300 es
         precision mediump float;
@@ -298,10 +295,10 @@ internal object Shaders {
         const float PI       = 3.14159265;
         const int   SEGMENTS = 12;
 
-        uniform sampler2D u_content;          // painter FBO (GL_REPEAT on S)
-        uniform vec2      u_resolution;       // screen pixels
-        uniform float     u_kaleido_rotation; // slow mandala rotation accumulator
-        uniform float     u_cyclone_angle;    // same cycloneAngleRad as the cylinder
+        uniform sampler2D u_content;
+        uniform vec2      u_resolution;
+        uniform float     u_kaleido_rotation;
+        uniform float     u_cyclone_angle;
 
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -313,23 +310,29 @@ internal object Shaders {
             float r     = length(centered);
             float theta = atan(centered.y, centered.x) + u_kaleido_rotation;
 
-            // Fold into a single mirror-symmetric wedge [0, segAngle/2].
+            // 12-fold symmetry
             float segAngle = 2.0 * PI / float(SEGMENTS);
             theta = mod(theta, segAngle);
             if (theta > segAngle * 0.5) theta = segAngle - theta;
 
-            // (r, theta) → painter FBO UV.
-            // frontU: anchors the sample to the front-facing cylinder column.
-            // thetaU * 12.0: spans ~50% of FBO per wedge so spokes show distinct colors.
-            float frontU  = mod(u_cyclone_angle / (2.0 * PI), 1.0);
-            float thetaU  = theta / (2.0 * PI) * 12.0;
+            // Kaleidoscope sampling (big coverage)
+            float frontU = mod(u_cyclone_angle / (2.0 * PI), 1.0);
+            float thetaU = (theta / (2.0 * PI)) * 2.0;
+            float radial = r * 1.9;
+
             vec2 sampleUV = vec2(
                 fract(frontU + thetaU),
-                clamp(r * 2.0, 0.0, 1.0)
+                clamp(radial, 0.0, 1.0)
             );
 
-            vec4 col  = texture(u_content, sampleUV);
-            fragColor = vec4(col.rgb, 0.5);
+            vec4 kaleido = texture(u_content, sampleUV);
+
+            // White frame with big circular window showing kaleidoscope
+            float holeRadius    = 0.52;
+            float isInsideHole  = step(r, holeRadius);
+            vec3  color         = mix(vec3(1.0), kaleido.rgb, isInsideHole);
+
+            fragColor = vec4(color, 1.0);
         }
     """.trimIndent()
 
@@ -400,6 +403,35 @@ internal object Shaders {
             vec3 col = hsv2rgb(vec3(baseHue, 0.85, audioBoost));
 
             fragColor = vec4(col, dotMask);
+        }
+    """.trimIndent()
+
+    // Image painter: samples a bundled JPG asset. Horizontal position is driven by
+    // u_cyclone_angle so the image window scrolls in sync with cylinder rotation.
+    // Opaque (alpha 1.0) — overwrites FBO like HueStripe/AudioPaint.
+    // For a 4096-wide source image and 1024-wide FBO: 4 full revolutions per image cycle.
+    val PAINTER_IMAGE_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        uniform sampler2D u_image;
+        uniform float     u_image_width;    // source image width in pixels (e.g. 4096)
+        uniform float     u_cyclone_angle;  // rotation accumulator in radians
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        const float PI = 3.14159265;
+
+        void main() {
+            // One revolution advances the image window by (FBO_width / image_width).
+            // For 4096-wide image: window advances 0.25 per revolution → 4 revs per cycle.
+            float rotationProgress  = u_cyclone_angle / (2.0 * PI);
+            float fboFractionOfImage = 1024.0 / u_image_width;
+            float sourceU = rotationProgress + v_uv.x * fboFractionOfImage;
+
+            // GL_REPEAT wraps sourceU for values outside [0,1].
+            fragColor = vec4(texture(u_image, vec2(sourceU, v_uv.y)).rgb, 1.0);
         }
     """.trimIndent()
 

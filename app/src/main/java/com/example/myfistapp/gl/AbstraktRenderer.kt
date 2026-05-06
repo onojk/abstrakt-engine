@@ -1,7 +1,10 @@
 package com.example.myfistapp.gl
 
+import android.content.Context
+import android.graphics.BitmapFactory
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
+import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
 import com.example.myfistapp.audio.AudioFile
@@ -25,7 +28,7 @@ private const val PAINTER_TEX_W      = 1024
 private const val PAINTER_TEX_H      = 256
 private const val PAINTER_STRIPE_W   = 16
 
-internal class AbstraktRenderer : GLSurfaceView.Renderer {
+internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     val audioUniforms = AudioUniforms()
     private val influencers = Influencers(audioUniforms)
@@ -51,6 +54,9 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
     private val cylinderVertexCount = CylinderGeometry.VERTEX_COUNT
     private var painterFBO      = 0
     private var painterTexture  = 0
+    private var imageTexture    = 0
+    private var imageWidth      = 0
+    private var imageHeight     = 0
     private var beatDecay       = 0f
     // FBO fields kept for createFBO/destroyFBO helpers — not used by Drift's polar branch.
     private var fboId        = 0
@@ -76,6 +82,9 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         kaleidoRotationRad = 0f
         painterFBO      = 0
         painterTexture  = 0
+        imageTexture    = 0
+        imageWidth      = 0
+        imageHeight     = 0
         fboId           = 0
         fboTexId        = 0
         startTimeNs     = 0L
@@ -192,6 +201,33 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+        // ── Image texture (Cyclone IMAGE painter) ───────────────────────────
+        try {
+            val opts = BitmapFactory.Options().also { it.inScaled = false }
+            val bmp  = context.assets.open("cyclone_image.jpg")
+                .use { BitmapFactory.decodeStream(it, null, opts) }
+            if (bmp != null) {
+                val iTexIds = IntArray(1)
+                GLES30.glGenTextures(1, iTexIds, 0)
+                imageTexture = iTexIds[0]
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T,     GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bmp, 0)
+                imageWidth  = bmp.width
+                imageHeight = bmp.height
+                bmp.recycle()
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                Log.d(TAG, "imageTexture loaded: ${imageWidth}x${imageHeight} id=$imageTexture")
+            } else {
+                Log.w(TAG, "cyclone_image.jpg decode returned null")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "cyclone_image.jpg load failed: ${e.message}")
+        }
 
         Log.d(TAG, "GL resources ready: quad vao=$vaoId cyclone vao=$cycloneVaoId " +
             "test=${testProgram?.id} warp=${warpProgram?.id} " +
@@ -332,7 +368,15 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                 pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
                 pProg.setFloat("u_beat_decay", beatDecay)
                 pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
+                pProg.setFloat("u_cyclone_angle", cycloneAngleRad)
                 pProg.setFloatArray("u_bands", snap.bands)
+                // IMAGE painter: bind source image to unit 1.
+                if (audioUniforms.activePainter == Painter.IMAGE && imageTexture != 0) {
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+                    pProg.setInt("u_image", 1)
+                    pProg.setFloat("u_image_width", imageWidth.toFloat())
+                }
                 if (endX <= PAINTER_TEX_W) {
                     GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
                     drawQuad()
@@ -342,6 +386,11 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                     drawQuad()
                     GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
                     drawQuad()
+                }
+                if (audioUniforms.activePainter == Painter.IMAGE) {
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
                 }
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
@@ -362,6 +411,8 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                 val mvpM   = FloatArray(16)
 
                 Matrix.setIdentityM(modelM, 0)
+                val shakeY = (beatDecay * 0.25f * Math.sin(timeSec * 35.0)).toFloat()
+                Matrix.translateM(modelM, 0, 0f, shakeY, 0f)
                 Matrix.rotateM(modelM, 0,
                     Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
                 Matrix.setLookAtM(viewM, 0,

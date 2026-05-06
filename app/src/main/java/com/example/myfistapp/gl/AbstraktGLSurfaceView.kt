@@ -6,7 +6,7 @@ import com.example.myfistapp.audio.AudioFile
 
 class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
 
-    private val renderer = AbstraktRenderer()
+    private val renderer = AbstraktRenderer(context)
 
     init {
         setEGLContextClientVersion(3)
