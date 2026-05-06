@@ -320,6 +320,11 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
                 GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
                 GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+                // Blend enabled so painters that output alpha<1 (e.g. PrintHead v2 transparent
+                // gaps) leave existing FBO content intact rather than overwriting with black.
+                // Opaque painters (HueStripe, AudioPaint, alpha=1) are unaffected.
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 pProg.use()
                 // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
                 pProg.setFloat("u_time", timeSec)
@@ -338,6 +343,7 @@ internal class AbstraktRenderer : GLSurfaceView.Renderer {
                     GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
                     drawQuad()
                 }
+                GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
 

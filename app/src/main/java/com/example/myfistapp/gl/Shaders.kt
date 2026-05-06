@@ -333,62 +333,73 @@ internal object Shaders {
         }
     """.trimIndent()
 
-    // PrintHead painter: regular dot grid, only dots inside a centered circle fire white.
-    // PrintHead painter: jobs cycle every 5s, each job picks a deterministic random center.
-    // The cylinder chassis paints one stripe per frame at the rear angle; successive frames
-    // within a job write the same circle pattern, so the circle rolls onto the cylinder
-    // surface over ~30s (one full revolution). Audio uniforms ignored.
-    // FBO aspect is 4:1; aspect correction uses vec2(4,1) for a pixel-space circle.
+    // PrintHead painter v2: transparent gaps + audio-reactive colored dots.
+    // Non-dot pixels output alpha=0 so the painter FBO retains previous content in gaps.
+    // Requires GL_BLEND enabled during the painter pass (handled in AbstraktRenderer Pass 1).
+    // Jobs cycle every 5s; each job picks a random center (hash11) and a base hue.
+    // Dot brightness scales with u_peak; hue shifts per job. FBO aspect 4:1.
     val PAINTER_PRINTHEAD_FRAG = """
         #version 300 es
         precision mediump float;
 
         uniform float u_time;
+        uniform float u_peak;
+        uniform float u_bands[8];
 
         in  vec2 v_uv;
         out vec4 fragColor;
 
         const float JOB_DURATION  = 5.0;
-        const float CIRCLE_RADIUS = 0.18;  // aspect-corrected units (≈46px radius)
-        const float GRID_SIZE     = 16.0;  // dot spacing in FBO pixels
-        const float DOT_SIZE      = 1.5;   // dot radius in FBO pixels
+        const float CIRCLE_RADIUS = 0.18;
+        const float GRID_SIZE     = 24.0;
+        const float DOT_SIZE      = 4.0;
 
-        // Cheap hash: input float → [0..1].
         float hash11(float n) {
             return fract(sin(n * 12.9898 + 78.233) * 43758.5453);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
         }
 
         void main() {
             vec2 fboSize = vec2(1024.0, 256.0);
             vec2 px      = v_uv * fboSize;
 
-            // Current job: increments every JOB_DURATION seconds.
             float jobIndex = floor(u_time / JOB_DURATION);
 
-            // Deterministic random center per job.
-            // X: full FBO width; Y: constrained to [0.3..0.7] to avoid clipping at top/bottom.
             float cx = hash11(jobIndex * 1.0);
             float cy = 0.3 + hash11(jobIndex * 1.7) * 0.4;
             vec2 center = vec2(cx, cy);
 
-            // Snap pixel to nearest grid cell center.
             vec2 gridPx = floor(px / GRID_SIZE) * GRID_SIZE + GRID_SIZE * 0.5;
             vec2 gridUV = gridPx / fboSize;
 
-            // Aspect-correct distance: FBO is 4:1; vec2(4,1) makes the test circular
-            // in pixel space (1 unit = fboSize.y = 256px in both axes).
+            // Aspect-correct distance: vec2(4,1) makes the test circular in pixel space.
             vec2  aspectDelta    = (gridUV - center) * vec2(fboSize.x / fboSize.y, 1.0);
             float distFromCenter = length(aspectDelta);
 
             if (distFromCenter >= CIRCLE_RADIUS) {
-                fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                fragColor = vec4(0.0);   // transparent — leave FBO content intact
                 return;
             }
 
-            // Inside circle: anti-aliased dot at cell center.
             float distToCell = length(px - gridPx);
             float dotMask    = 1.0 - smoothstep(DOT_SIZE - 0.5, DOT_SIZE + 0.5, distToCell);
-            fragColor        = vec4(vec3(dotMask), 1.0);
+
+            if (dotMask < 0.01) {
+                fragColor = vec4(0.0);   // gap between dots inside circle — also transparent
+                return;
+            }
+
+            // Audio-reactive color: job-seeded hue, peak-driven brightness.
+            float baseHue   = hash11(jobIndex * 2.3);
+            float audioBoost = 0.6 + u_peak * 0.4;
+            vec3 col = hsv2rgb(vec3(baseHue, 0.85, audioBoost));
+
+            fragColor = vec4(col, dotMask);
         }
     """.trimIndent()
 
