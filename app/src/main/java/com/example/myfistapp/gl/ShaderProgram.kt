@@ -54,6 +54,12 @@ internal class ShaderProgram(vertSrc: String, fragSrc: String) {
         GLES30.glUniform1fv(loc, values.size, values, 0)
     }
 
+    fun setMat4(name: String, value: FloatArray) {
+        val loc = GLES30.glGetUniformLocation(id, name)
+        if (loc == -1) return
+        GLES30.glUniformMatrix4fv(loc, 1, false, value, 0)
+    }
+
     fun delete() = GLES30.glDeleteProgram(id)
 
     private fun compileShader(type: Int, src: String): Int {

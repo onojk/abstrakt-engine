@@ -10,6 +10,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
 
     init {
         setEGLContextClientVersion(3)
+        setEGLConfigChooser(8, 8, 8, 8, 16, 0) // 16-bit depth buffer for 3D modes
         setRenderer(renderer)
         renderMode = RENDERMODE_CONTINUOUSLY
     }

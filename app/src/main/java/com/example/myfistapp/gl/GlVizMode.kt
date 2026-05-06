@@ -1,3 +1,3 @@
 package com.example.myfistapp.gl
 
-enum class GlVizMode { TEST, WARP, DRIFT }
+enum class GlVizMode { TEST, WARP, DRIFT, CYCLONE }

@@ -209,6 +209,55 @@ internal object Shaders {
         }
     """.trimIndent()
 
+    val CYCLONE_VERT = """
+        #version 300 es
+        layout(location = 0) in vec3 a_position;
+        layout(location = 1) in vec2 a_uv;
+        uniform mat4 u_mvp;
+        out vec2 v_uv;
+        void main() {
+            v_uv = a_uv;
+            gl_Position = u_mvp * vec4(a_position, 1.0);
+        }
+    """.trimIndent()
+
+    // Samples the rolling painter texture — no procedural logic here.
+    val CYCLONE_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform sampler2D u_painterTexture;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        void main() {
+            fragColor = texture(u_painterTexture, v_uv);
+        }
+    """.trimIndent()
+
+    // Painter uses the same fullscreen-quad vertex shader as the 2D modes.
+    val PAINTER_VERT = TEST_VERT
+
+    // Writes a solid hue band (varying with time) + vertical brightness gradient.
+    // Hue cycles every 20s so each stripe's age is visually readable.
+    val PAINTER_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform float u_time;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            float hue = fract(u_time * 0.05);          // full cycle every 20s
+            float val = 0.4 + 0.6 * v_uv.y;           // darker bottom, brighter top
+            fragColor = vec4(hsv2rgb(vec3(hue, 1.0, val)), 1.0);
+        }
+    """.trimIndent()
+
     val DRIFT_POLAR_FRAG = """
         #version 300 es
         precision mediump float;

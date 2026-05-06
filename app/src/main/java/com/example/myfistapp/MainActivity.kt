@@ -65,6 +65,7 @@ private enum class Viz(val label: String) {
     KALEIDO("Echo"),
     GL_WARP("Warp"),   // GL renderer — replaces Compose Warp as the primary warp toggle
     GL_DRIFT("Drift"),
+    GL_CYCLONE("Cyclone"),
 }
 
 class MainActivity : ComponentActivity() {
@@ -180,7 +181,7 @@ private fun VisualizerScreen() {
             // Visualizer toggle — Wave | Warp(GL) | Echo | GL.  WARPFIELD is kept in the enum
             // for Echo's internal WarpfieldCanvas layer but has no top-level button.
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_DRIFT).forEach { viz ->
+                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_DRIFT, Viz.GL_CYCLONE).forEach { viz ->
                     val active = currentViz == viz
                     Button(
                         onClick = { currentViz = viz },
@@ -241,6 +242,12 @@ private fun VisualizerScreen() {
                             audioFile = audioFile,
                             playbackFraction = playbackFraction,
                             glMode = GlVizMode.DRIFT,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_CYCLONE -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.CYCLONE,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
