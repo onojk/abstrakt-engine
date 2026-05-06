@@ -63,8 +63,8 @@ private enum class Viz(val label: String) {
     WAVEFORM("Wave"),
     WARPFIELD("Warp"),
     KALEIDO("Echo"),
-    GL_TEST("GL"),
     GL_WARP("Warp"),   // GL renderer — replaces Compose Warp as the primary warp toggle
+    GL_DRIFT("Drift"),
 }
 
 class MainActivity : ComponentActivity() {
@@ -179,8 +179,8 @@ private fun VisualizerScreen() {
 
             // Visualizer toggle — Wave | Warp(GL) | Echo | GL.  WARPFIELD is kept in the enum
             // for Echo's internal WarpfieldCanvas layer but has no top-level button.
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_TEST).forEach { viz ->
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_DRIFT).forEach { viz ->
                     val active = currentViz == viz
                     Button(
                         onClick = { currentViz = viz },
@@ -231,16 +231,16 @@ private fun VisualizerScreen() {
                             playbackFraction = playbackFraction,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        Viz.GL_TEST -> GlCanvas(
-                            audioFile = audioFile,
-                            playbackFraction = playbackFraction,
-                            glMode = GlVizMode.TEST,
-                            modifier = Modifier.fillMaxSize(),
-                        )
                         Viz.GL_WARP -> GlCanvas(
                             audioFile = audioFile,
                             playbackFraction = playbackFraction,
                             glMode = GlVizMode.WARP,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_DRIFT -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.DRIFT,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
