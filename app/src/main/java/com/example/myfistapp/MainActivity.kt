@@ -15,9 +15,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -80,6 +85,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.StreamingAnalyzer
 import com.example.myfistapp.audio.loadAndAnalyze
 import com.example.myfistapp.gl.AbstraktGLSurfaceView
 import com.example.myfistapp.gl.GlVizMode
@@ -142,6 +148,12 @@ private fun VisualizerScreen() {
     // "Replace" flow: slotIndex being replaced (null = fresh add).
     var replacingSlotIndex by remember { mutableStateOf<Int?>(null) }
 
+    // Mic state.
+    var isMicActive         by remember { mutableStateOf(false) }
+    var wasPlayingBeforeMic by remember { mutableStateOf(false) }
+    val micAnalyzer = remember { StreamingAnalyzer() }
+    val micCapture  = remember { MicCapture(micAnalyzer) }
+
     // Long-press sheet state.
     var showSlotSheet    by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -162,7 +174,11 @@ private fun VisualizerScreen() {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> glView.onResume()
-                Lifecycle.Event.ON_PAUSE  -> glView.onPause()
+                Lifecycle.Event.ON_PAUSE  -> {
+                    glView.onPause()
+                    micCapture.stop()
+                    isMicActive = false
+                }
                 else -> {}
             }
         }
@@ -195,6 +211,27 @@ private fun VisualizerScreen() {
             val dur = audioFile?.durationMs ?: 0L
             if (dur > 0) playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
             delay(16L)
+        }
+    }
+
+    val livePulse = remember { Animatable(0.4f) }
+
+    // Feeds streaming mic snapshots into the GL renderer and drives the LIVE pulse animation.
+    LaunchedEffect(isMicActive) {
+        if (isMicActive) {
+            launch {
+                while (true) {
+                    livePulse.animateTo(1.0f, animationSpec = tween<Float>(500))
+                    livePulse.animateTo(0.4f, animationSpec = tween<Float>(500))
+                }
+            }
+            while (true) {
+                glView.setLiveSnapshot(micAnalyzer.streamingSnapshot())
+                delay(16L)
+            }
+        } else {
+            livePulse.snapTo(0.4f)
+            glView.setLiveSnapshot(null)
         }
     }
 
@@ -254,6 +291,23 @@ private fun VisualizerScreen() {
         }
     }
 
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            wasPlayingBeforeMic = isPlaying
+            if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
+            micCapture.start(scope)
+            isMicActive = true
+        } else {
+            Toast.makeText(
+                context,
+                "Microphone permission denied. Enable it in Settings → App permissions.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
     fun onTakePhoto() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED
@@ -270,6 +324,27 @@ private fun VisualizerScreen() {
 
     fun onPickGallery() {
         photoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+    }
+
+    fun onMicToggle() {
+        if (isMicActive) {
+            micCapture.stop()
+            isMicActive = false
+            if (wasPlayingBeforeMic && audioFile != null) {
+                try { mediaPlayer.start(); isPlaying = true } catch (_: IllegalStateException) {}
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                wasPlayingBeforeMic = isPlaying
+                if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
+                micCapture.start(scope)
+                isMicActive = true
+            } else {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
     }
 
     // Shared "save skin" logic used by both fresh add and replace.
@@ -585,61 +660,96 @@ private fun VisualizerScreen() {
 
         }
 
-        // ── Top-right button row: Export + Add Skin ───────────────────────────
-        Row(
+        // ── Top-right button column: Mic + Export + Add Skin ─────────────────
+        Column(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
                 .padding(top = 8.dp, end = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.End,
         ) {
-            // Export button
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(NeonCyan.copy(alpha = 0.15f))
-                    .alpha(if (isRendererReady) 1f else 0.3f)
-                    .clickable(enabled = isRendererReady) {
-                        showExportWizard = true
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
-
-            // "+" button — Add Skin
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(NeonCyan.copy(alpha = 0.15f))
-                    .alpha(if (isRendererReady) 1f else 0.3f)
-                    .clickable(enabled = isRendererReady) { onAddSkinTapped() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-                DropdownMenu(
-                    expanded         = showAddMenu,
-                    onDismissRequest = { showAddMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text    = { Text("Take Photo") },
-                        onClick = { showAddMenu = false; onTakePhoto() },
-                    )
-                    DropdownMenuItem(
-                        text    = { Text("Pick from Gallery") },
-                        onClick = { showAddMenu = false; onPickGallery() },
-                    )
-                    Box(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
-                            color = DimWhite.copy(alpha = 0.5f),
-                            fontSize = 14.sp,
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Mic toggle button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isMicActive) Color(0xFFFF2D78).copy(alpha = 0.20f)
+                            else NeonCyan.copy(alpha = 0.15f)
                         )
+                        .alpha(if (isRendererReady) 1f else 0.3f)
+                        .clickable(enabled = isRendererReady) { onMicToggle() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isMicActive) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = if (isMicActive) "Stop microphone" else "Use microphone",
+                        tint = if (isMicActive) Color(0xFFFF2D78) else NeonCyan,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+
+                // Export button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(NeonCyan.copy(alpha = 0.15f))
+                        .alpha(if (isRendererReady) 1f else 0.3f)
+                        .clickable(enabled = isRendererReady) {
+                            showExportWizard = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // "+" button — Add Skin
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(NeonCyan.copy(alpha = 0.15f))
+                        .alpha(if (isRendererReady) 1f else 0.3f)
+                        .clickable(enabled = isRendererReady) { onAddSkinTapped() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+
+                    DropdownMenu(
+                        expanded         = showAddMenu,
+                        onDismissRequest = { showAddMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text    = { Text("Take Photo") },
+                            onClick = { showAddMenu = false; onTakePhoto() },
+                        )
+                        DropdownMenuItem(
+                            text    = { Text("Pick from Gallery") },
+                            onClick = { showAddMenu = false; onPickGallery() },
+                        )
+                        Box(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
+                                color = DimWhite.copy(alpha = 0.5f),
+                                fontSize = 14.sp,
+                            )
+                        }
                     }
                 }
+            }
+
+            // "● LIVE" pulsing indicator shown below buttons while mic is active.
+            if (isMicActive) {
+                Text(
+                    text          = "● LIVE",
+                    color         = Color(0xFFFF2D78).copy(alpha = livePulse.value),
+                    fontSize      = 11.sp,
+                    fontWeight    = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier      = Modifier.padding(top = 3.dp),
+                )
             }
         }
     }

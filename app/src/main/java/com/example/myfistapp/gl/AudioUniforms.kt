@@ -18,16 +18,20 @@ internal class AudioUniforms {
     @Volatile var audioFile: AudioFile? = null
     @Volatile var playbackFraction: Float = 0f
     @Volatile var activePainter: Painter = Painter.HUE_STRIPE
+    // Non-null while mic is active; takes priority over file-based snapshot.
+    @Volatile var liveSnapshot: AudioSnapshot? = null
 
     // Reset to false in onSurfaceCreated so locations are re-logged after context restore.
     internal var uniformsLogged = false
 
     fun getSnapshot(): AudioSnapshot =
-        audioFile?.let { snapshotAt(it, playbackFraction) }
+        liveSnapshot
+            ?: audioFile?.let { snapshotAt(it, playbackFraction) }
             ?: AudioSnapshot(FloatArray(8), 0f, false)
 
     fun applyToProgram(program: ShaderProgram, timeSec: Float) {
-        val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
+        val snap = liveSnapshot
+            ?: audioFile?.let { snapshotAt(it, playbackFraction) }
             ?: AudioSnapshot(FloatArray(8), 0f, false)
 
         if (!uniformsLogged) {

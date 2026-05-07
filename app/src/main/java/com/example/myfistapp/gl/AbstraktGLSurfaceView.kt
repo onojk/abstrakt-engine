@@ -3,6 +3,7 @@ package com.example.myfistapp.gl
 import android.content.Context
 import android.opengl.GLSurfaceView
 import com.example.myfistapp.Mode
+import com.example.myfistapp.audio.AudioSnapshot
 
 class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
 
@@ -31,4 +32,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setCurrentMode(mode: Mode)              { renderer.currentMode = mode }
     fun invalidateUserSkinTexture(path: String) { queueEvent { renderer.invalidateUserSkinTexture(path) } }
     fun setRendererReadyCallback(cb: () -> Unit) { renderer.onReadyCallback = cb }
+    fun setLiveSnapshot(snap: AudioSnapshot?)    { renderer.audioUniforms.liveSnapshot = snap }
 }
