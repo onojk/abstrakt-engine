@@ -168,6 +168,8 @@ private fun VisualizerScreen() {
     var registryVersion  by remember { mutableIntStateOf(0) }
     var showCropper      by remember { mutableStateOf(false) }
     var pendingPhotoUri  by remember { mutableStateOf<Uri?>(null) }
+    val isRendererReadyState = remember { mutableStateOf(false) }
+    var isRendererReady  by isRendererReadyState
     // Temp file for camera capture — held so it can be deleted after crop completes.
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     // "Replace" flow: slotIndex being replaced (null = fresh add).
@@ -183,7 +185,11 @@ private fun VisualizerScreen() {
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
 
     // Hoist GL view so it survives mode switches (including AddSlot).
-    val glView = remember { AbstraktGLSurfaceView(context) }
+    val glView = remember {
+        AbstraktGLSurfaceView(context).also { view ->
+            view.setRendererReadyCallback { isRendererReadyState.value = true }
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) glView.onResume()
         val observer = LifecycleEventObserver { _, event ->
@@ -348,6 +354,12 @@ private fun VisualizerScreen() {
         animationSpec = if (hintVisible) snap() else tween(1500),
         label = "swipe_hint",
     )
+    // Fades to 0 once the GL renderer is ready — drives the loading overlay opacity.
+    val loadingOverlayAlpha by animateFloatAsState(
+        targetValue  = if (!isRendererReady) 1f else 0f,
+        animationSpec = tween(300),
+        label = "renderer_ready",
+    )
     LaunchedEffect(Unit) {
         if (hintVisible) {
             delay(1000L)
@@ -455,7 +467,9 @@ private fun VisualizerScreen() {
 
             Spacer(Modifier.height(10.dp))
 
-            DotsRow(modes, currentMode, currentModeIdx)
+            Box(modifier = Modifier.alpha(if (isRendererReady) 1f else 0.3f)) {
+                DotsRow(modes, currentMode, currentModeIdx)
+            }
 
             Spacer(Modifier.height(10.dp))
 
@@ -498,9 +512,31 @@ private fun VisualizerScreen() {
                     )
                 }
 
+                // Loading overlay — fades out once the GL renderer signals ready.
+                if (loadingOverlayAlpha > 0f && currentMode != Mode.AddSlot && !isLoading && errorMsg == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = loadingOverlayAlpha)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.alpha(loadingOverlayAlpha),
+                        ) {
+                            CircularProgressIndicator(
+                                color    = NeonCyan,
+                                modifier = Modifier.size(56.dp),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text("Loading visualizer...", color = DimWhite, fontSize = 16.sp)
+                        }
+                    }
+                }
+
                 // Transparent overlay — above GLSurfaceView, captures swipe + long-press.
-                // Only when GL is active (AddSlotPrompt handles its own gestures).
-                if (currentMode != Mode.AddSlot && !isLoading && errorMsg == null) {
+                // Only when GL is active and ready (AddSlotPrompt handles its own gestures).
+                if (currentMode != Mode.AddSlot && !isLoading && errorMsg == null && isRendererReady) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -616,7 +652,8 @@ private fun VisualizerScreen() {
                 .size(40.dp)
                 .clip(CircleShape)
                 .background(NeonCyan.copy(alpha = 0.15f))
-                .clickable { onAddSkinTapped() },
+                .alpha(if (isRendererReady) 1f else 0.3f)
+                .clickable(enabled = isRendererReady) { onAddSkinTapped() },
             contentAlignment = Alignment.Center,
         ) {
             Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)

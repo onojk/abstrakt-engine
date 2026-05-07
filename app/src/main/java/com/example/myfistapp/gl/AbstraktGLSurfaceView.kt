@@ -30,4 +30,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setUserSkinFile(path: String?)       { renderer.userSkinFilePath = path }
     fun setCurrentMode(mode: Mode)              { renderer.currentMode = mode }
     fun invalidateUserSkinTexture(path: String) { queueEvent { renderer.invalidateUserSkinTexture(path) } }
+    fun setRendererReadyCallback(cb: () -> Unit) { renderer.onReadyCallback = cb }
 }

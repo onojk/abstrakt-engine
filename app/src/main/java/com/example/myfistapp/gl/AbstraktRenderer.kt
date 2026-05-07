@@ -6,6 +6,9 @@ import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.opengl.Matrix
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioFile
@@ -88,7 +91,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     @Volatile var currentMode: Mode = Mode.Cyclone
     private var lastStampedMode: Mode? = null
 
+    // Callback fired on the main thread once all critical GL resources are ready.
+    var onReadyCallback: (() -> Unit)? = null
+    private var allResourcesReady = false
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        val scStart = SystemClock.elapsedRealtime()
         Log.d(TAG, "onSurfaceCreated — building GL resources")
         testProgram        = null
         warpProgram        = null
@@ -121,7 +129,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         fboTexId        = 0
         startTimeNs     = 0L
         lastFrameNs     = 0L
-        lastStampedMode = null   // force re-stamp after context loss
+        lastStampedMode   = null   // force re-stamp after context loss
+        allResourcesReady = false
         audioUniforms.uniformsLogged = false
 
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -265,45 +274,25 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             Log.w(TAG, "cyclone_image.jpg load failed: ${e.message}")
         }
 
-        // ── Skin textures (skin1..skin5 from drawable resources) ────────────
-        for (n in 1..5) {
-            try {
-                val opts  = BitmapFactory.Options().also { it.inScaled = false }
-                val resId = context.resources.getIdentifier("skin$n", "drawable", context.packageName)
-                val bmp   = BitmapFactory.decodeResource(context.resources, resId, opts)
-                if (bmp != null) {
-                    val tIds = IntArray(1)
-                    GLES30.glGenTextures(1, tIds, 0)
-                    skinTextures[n - 1] = tIds[0]
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, skinTextures[n - 1])
-                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
-                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T,     GLES30.GL_CLAMP_TO_EDGE)
-                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-                    GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-                    GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bmp, 0)
-                    bmp.recycle()
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                    Log.d(TAG, "skinTexture[$n] loaded resId=$resId id=${skinTextures[n - 1]}")
-                } else {
-                    Log.w(TAG, "skin$n decode returned null (resId=$resId)")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "skin$n load failed: ${e.message}")
-            }
-        }
+        // Skin textures (skin1..skin5) are deferred — loaded on first access via
+        // loadBuiltinSkinTexture() to avoid blocking the first rendered frame.
 
-        Log.d(TAG, "GL resources ready: quad vao=$vaoId cyclone vao=$cycloneVaoId " +
-            "test=${testProgram?.id} warp=${warpProgram?.id} " +
-            "drift=${driftProgram?.id} cyclone=${cycloneProgram?.id} " +
-            "painters=${painterPrograms.mapValues { it.value.id }}")
+        Log.d(TAG, "onSurfaceCreated complete in ${SystemClock.elapsedRealtime() - scStart}ms — " +
+            "quad vao=$vaoId cyclone vao=$cycloneVaoId " +
+            "cyclone=${cycloneProgram?.id} painters=${painterPrograms.mapValues { it.value.id }}")
     }
 
     override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
+        val swStart = SystemClock.elapsedRealtime()
         surfaceWidth  = w
         surfaceHeight = h
         GLES30.glViewport(0, 0, w, h)
         if (w > 0 && h > 0) createRibbonFBOs(PAINTER_TEX_W, PAINTER_TEX_H)
-        Log.d(TAG, "onSurfaceChanged: ${w}x${h}")
+        Log.d(TAG, "onSurfaceChanged complete in ${SystemClock.elapsedRealtime() - swStart}ms — ${w}x${h}")
+        if (!allResourcesReady) {
+            allResourcesReady = true
+            Handler(Looper.getMainLooper()).post { onReadyCallback?.invoke() }
+        }
     }
 
     // ── FBO helpers — available for future two-pass visualizers. ──────────────
@@ -580,7 +569,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         // SKIN painter: bind the selected skin texture to unit 0.
         if (audioUniforms.activePainter == Painter.SKIN) {
             val sTex = if (skinIndex >= 0) {
-                skinTextures.getOrElse(skinIndex) { 0 }
+                val t = skinTextures.getOrElse(skinIndex) { 0 }
+                if (t != 0) t else loadBuiltinSkinTexture(skinIndex)
             } else {
                 val path = userSkinFilePath
                 if (path != null) userSkinTextureCache.getOrPut(path) { loadUserSkinTexture(path) }
@@ -747,7 +737,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private fun stampFullSkinIntoPainterFbo(mode: Mode): Boolean {
         val bProg = blitProgram ?: return false
         val sTex: Int = when (mode) {
-            is Mode.Builtin  -> skinTextures.getOrElse(skinIndex) { 0 }
+            is Mode.Builtin  -> {
+                val t = skinTextures.getOrElse(skinIndex) { 0 }
+                if (t != 0) t else loadBuiltinSkinTexture(skinIndex)
+            }
             is Mode.UserSlot -> {
                 val path = userSkinFilePath ?: return false
                 userSkinTextureCache[path] ?: return false  // don't block GL thread
@@ -780,6 +773,33 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         Log.d(TAG, "clearPainterFbo: entering $currentMode")
+    }
+
+    // Loads skin(idx+1) from drawable on the GL thread and caches it in skinTextures.
+    // Safe to call from renderFrame / stampFullSkinIntoPainterFbo on first access.
+    private fun loadBuiltinSkinTexture(idx: Int): Int {
+        val n = idx + 1
+        return try {
+            val opts  = BitmapFactory.Options().also { it.inScaled = false }
+            val resId = context.resources.getIdentifier("skin$n", "drawable", context.packageName)
+            val bmp   = BitmapFactory.decodeResource(context.resources, resId, opts) ?: return 0
+            val tIds  = IntArray(1)
+            GLES30.glGenTextures(1, tIds, 0)
+            skinTextures[idx] = tIds[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, skinTextures[idx])
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T,     GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bmp, 0)
+            bmp.recycle()
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            Log.d(TAG, "skinTexture[$n] loaded on-demand id=${skinTextures[idx]}")
+            skinTextures[idx]
+        } catch (e: Exception) {
+            Log.w(TAG, "skin$n on-demand load failed: ${e.message}")
+            0
+        }
     }
 
     fun invalidateUserSkinTexture(path: String) {
