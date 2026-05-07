@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -98,44 +99,10 @@ sealed class Mode {
     object AddSlot : Mode()
 }
 
-private val BgColor  = Color(0xFF0A0A0F)
-private val NeonCyan = Color(0xFF00FFFF)
-private val DimWhite = Color(0x99FFFFFF)
+internal val BgColor  = Color(0xFF0A0A0F)
+internal val NeonCyan = Color(0xFF00FFFF)
+internal val DimWhite = Color(0x99FFFFFF)
 
-// Kept for Builtin mode config lookup — not used as current-mode state.
-private enum class Viz(val label: String) {
-    GL_CYCLONE("Cyclone"),
-    SKIN1("Skin 1"),
-    SKIN2("Skin 2"),
-    SKIN3("Skin 3"),
-    SKIN4("Skin 4"),
-    SKIN5("Skin 5"),
-}
-
-private data class SkinConfig(
-    val painter: Painter,
-    val skinIndex: Int,
-    val folds: Float,
-    val rr: Float, val rg: Float, val rb: Float,
-    val beatThreshold: Float,
-)
-
-private val VIZ_CONFIG = mapOf(
-    Viz.GL_CYCLONE to SkinConfig(Painter.IMAGE,      0,  12f, 0f,    0f,    0f,    0.40f),
-    Viz.SKIN1      to SkinConfig(Painter.SKIN,       0,  12f, 0f,    0f,    0f,    0.40f),
-    Viz.SKIN2      to SkinConfig(Painter.SKIN,       1,   8f, 0.20f, 0.05f, 0.30f, 0.30f),
-    Viz.SKIN3      to SkinConfig(Painter.SKIN,       2,  16f, 0.95f, 0.95f, 0.95f, 0.50f),
-    Viz.SKIN4      to SkinConfig(Painter.SKIN,       3,   6f, 0.05f, 0.20f, 0.22f, 0.35f),
-    Viz.SKIN5      to SkinConfig(Painter.SKIN,       4,  10f, 0.25f, 0.05f, 0.08f, 0.45f),
-)
-
-private fun builtinConfig(skinIndex: Int): SkinConfig {
-    val viz = when (skinIndex) {
-        1 -> Viz.SKIN1; 2 -> Viz.SKIN2; 3 -> Viz.SKIN3
-        4 -> Viz.SKIN4; 5 -> Viz.SKIN5; else -> Viz.GL_CYCLONE
-    }
-    return VIZ_CONFIG[viz]!!
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -164,7 +131,7 @@ private fun VisualizerScreen() {
     var isPlaying        by remember { mutableStateOf(false) }
     var playbackFraction by remember { mutableFloatStateOf(0f) }
     var currentMode      by remember { mutableStateOf<Mode>(Mode.Cyclone) }
-    var isExporting      by remember { mutableStateOf(false) }
+    var showExportWizard by remember { mutableStateOf(false) }
     var registryVersion  by remember { mutableIntStateOf(0) }
     var showCropper      by remember { mutableStateOf(false) }
     var pendingPhotoUri  by remember { mutableStateOf<Uri?>(null) }
@@ -376,6 +343,16 @@ private fun VisualizerScreen() {
             for (slot in SkinSlotRegistry.filledSlots()) add(Mode.UserSlot(slot.index))
             if (SkinSlotRegistry.firstEmptySlotIndex() != null) add(Mode.AddSlot)
         }
+    }
+
+    // ── Export wizard swap ────────────────────────────────────────────────────
+    if (showExportWizard) {
+        ExportWizard(
+            currentMode      = currentMode,
+            currentAudioFile = audioFile,
+            onDismiss        = { showExportWizard = false },
+        )
+        return
     }
 
     // ── Crop screen swap ──────────────────────────────────────────────────────
@@ -606,77 +583,62 @@ private fun VisualizerScreen() {
                 }
             }
 
-            if (BuildConfig.DEBUG) {
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        if (!isExporting) {
-                            isExporting = true
-                            Toast.makeText(context, "Exporting test MP4...", Toast.LENGTH_SHORT).show()
-                            val outputFile = File(context.filesDir, "exports/test_${System.currentTimeMillis()}.mp4")
-                            scope.launch {
-                                val exporter = Mp4Exporter(context, outputFile, width = 1920, height = 1080, audioSourceUri = audioFile?.uri)
-                                val result = exporter.exportVisualizer { progress ->
-                                    Log.d("Mp4Exporter", "Progress: ${(progress * 100).toInt()}%")
-                                }
-                                isExporting = false
-                                result.fold(
-                                    onSuccess = { file ->
-                                        Toast.makeText(context, "Done: ${file.absolutePath}", Toast.LENGTH_LONG).show()
-                                    },
-                                    onFailure = { e ->
-                                        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                                        Log.e("Mp4Exporter", "Export error", e)
-                                    },
-                                )
-                            }
-                        }
-                    },
-                    enabled = !isExporting,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333340)),
-                ) {
-                    Text(
-                        text = if (isExporting) "Exporting..." else "Export Test MP4",
-                        color = DimWhite,
-                        fontSize = 12.sp,
-                    )
-                }
-            }
         }
 
-        // ── "+" button — top-right corner ─────────────────────────────────────
-        Box(
+        // ── Top-right button row: Export + Add Skin ───────────────────────────
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 28.dp, end = 12.dp)
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(NeonCyan.copy(alpha = 0.15f))
-                .alpha(if (isRendererReady) 1f else 0.3f)
-                .clickable(enabled = isRendererReady) { onAddSkinTapped() },
-            contentAlignment = Alignment.Center,
+                .statusBarsPadding()
+                .padding(top = 8.dp, end = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-            // Add-skin menu anchored to the "+" button.
-            DropdownMenu(
-                expanded  = showAddMenu,
-                onDismissRequest = { showAddMenu = false },
+            // Export button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) {
+                        showExportWizard = true
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                DropdownMenuItem(
-                    text = { Text("Take Photo") },
-                    onClick = { showAddMenu = false; onTakePhoto() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Pick from Gallery") },
-                    onClick = { showAddMenu = false; onPickGallery() },
-                )
-                Box(modifier = Modifier.padding(8.dp)) {
-                    Text(
-                        text = "Photos: 1024×256 to 8000×6000, max 50 MB",
-                        color = DimWhite.copy(alpha = 0.5f),
-                        fontSize = 14.sp,
+                Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // "+" button — Add Skin
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) { onAddSkinTapped() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+
+                DropdownMenu(
+                    expanded         = showAddMenu,
+                    onDismissRequest = { showAddMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text    = { Text("Take Photo") },
+                        onClick = { showAddMenu = false; onTakePhoto() },
                     )
+                    DropdownMenuItem(
+                        text    = { Text("Pick from Gallery") },
+                        onClick = { showAddMenu = false; onPickGallery() },
+                    )
+                    Box(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
+                            color = DimWhite.copy(alpha = 0.5f),
+                            fontSize = 14.sp,
+                        )
+                    }
                 }
             }
         }
@@ -909,34 +871,19 @@ private fun GlCanvas(
             view.setCurrentMode(currentMode)
 
             when (val m = currentMode) {
-                Mode.Cyclone -> {
-                    val cfg = VIZ_CONFIG[Viz.GL_CYCLONE]!!
-                    view.setPainter(cfg.painter)
-                    view.setSkinIndex(cfg.skinIndex)
-                    view.setUserSkinFile(null)
-                    view.setKaleidoFolds(cfg.folds)
-                    view.setRibbonColor(cfg.rr, cfg.rg, cfg.rb)
-                    view.setBeatThreshold(cfg.beatThreshold)
-                }
-                is Mode.Builtin -> {
-                    val cfg = builtinConfig(m.skinIndex)
-                    view.setPainter(cfg.painter)
-                    view.setSkinIndex(cfg.skinIndex)
-                    view.setUserSkinFile(null)
-                    view.setKaleidoFolds(cfg.folds)
-                    view.setRibbonColor(cfg.rr, cfg.rg, cfg.rb)
-                    view.setBeatThreshold(cfg.beatThreshold)
-                }
-                is Mode.UserSlot -> {
-                    val slot = SkinSlotRegistry.filledSlots().find { it.index == m.slotIndex }
-                    view.setPainter(Painter.SKIN)
-                    view.setSkinIndex(-1)
-                    view.setUserSkinFile(slot?.file?.absolutePath)
-                    view.setKaleidoFolds(12f)
-                    view.setRibbonColor(0f, 0f, 0f)
-                    view.setBeatThreshold(0.40f)
-                }
                 Mode.AddSlot -> { /* not rendered */ }
+                else -> {
+                    val cfg = skinConfigForMode(m)
+                    val userPath = if (m is Mode.UserSlot)
+                        SkinSlotRegistry.filledSlots().find { it.index == m.slotIndex }?.file?.absolutePath
+                    else null
+                    view.setPainter(cfg.painter)
+                    view.setSkinIndex(cfg.skinIndex)
+                    view.setUserSkinFile(userPath)
+                    view.setKaleidoFolds(cfg.folds)
+                    view.setRibbonColor(cfg.rr, cfg.rg, cfg.rb)
+                    view.setBeatThreshold(cfg.beatThreshold)
+                }
             }
         },
         modifier = modifier,
