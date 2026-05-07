@@ -12,39 +12,50 @@ import android.opengl.EGLConfig
 import android.opengl.EGLExt
 import android.util.Log
 import android.view.Surface
+import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.AudioSnapshot
+import com.example.myfistapp.audio.analyzeOffline
 import com.example.myfistapp.gl.AbstraktRenderer
 import com.example.myfistapp.gl.GlVizMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.nio.ByteBuffer
+import java.io.FileDescriptor
 import java.util.concurrent.Executors
+
+private enum class AudioPath { DECODE_REENCODE_PCM, DECODE_REENCODE_COMPRESSED }
 
 class Mp4Exporter(
     private val context: Context,
-    private val outputFile: File,
     private val width: Int,
     private val height: Int,
     private val fps: Int = 60,
     private val durationSeconds: Float = 5f,
     private val bitrate: Int = 10_000_000,
-    private val audioSourceUri: Uri? = null,
+    private val audioFile: AudioFile? = null,
+    private val exportMode: Mode = Mode.Cyclone,
+    private val userSkinFilePath: String? = null,
+    private val beatResponseEnabled: Boolean = true,
+    private val outputFile: File? = null,
+    private val outputFd: FileDescriptor? = null,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
         private const val EGL_RECORDABLE_ANDROID = 0x3142
+        private const val AUDIO_AAC_BITRATE = 192_000
     }
 
     private lateinit var encoder: MediaCodec
     private lateinit var muxer: MediaMuxer
     private var muxerStarted = false
 
-    // Both tracks must be added before muxer.start() is called.
     private var videoMuxTrackIndex = -1
     private var audioMuxTrackIndex = -1
     private var videoTrackReady = false
-    private var audioTrackReady = false     // true immediately if no audio source
+    private var audioTrackReady = false
 
     private var eglDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext = EGL14.EGL_NO_CONTEXT
@@ -52,15 +63,23 @@ class Mp4Exporter(
 
     private val renderer = AbstraktRenderer(context)
     private var audioExtractor: MediaExtractor? = null
-    private val audioPumpBuffer = ByteBuffer.allocate(256 * 1024)
 
-    suspend fun exportVisualizer(onProgress: (Float) -> Unit): Result<File> {
+    // Re-encode path — nullable; only allocated when audioPath != DIRECT_COPY
+    private var audioDecoder: MediaCodec? = null
+    private var audioEncoder: MediaCodec? = null
+    private var decoderEosReached = false
+    private var encoderEosSignaled = false
+    private var encoderEosReached = false
+
+    // Production export — MediaStore fd-based. Rethrows CancellationException.
+    suspend fun export(onProgress: (Float, String) -> Unit): Result<Unit> {
         val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
         return try {
-            withContext(dispatcher) {
-                runExport(onProgress)
-            }
-            Result.success(outputFile)
+            withContext(dispatcher) { runExport(onProgress) }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            Log.d(TAG, "Export cancelled")
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Export failed", e)
             Result.failure(e)
@@ -69,44 +88,47 @@ class Mp4Exporter(
         }
     }
 
-    private fun runExport(onProgress: (Float) -> Unit) {
-        outputFile.parentFile?.mkdirs()
+    private suspend fun runExport(onProgress: (Float, String) -> Unit) {
+        check(outputFile != null || outputFd != null) { "Either outputFile or outputFd must be provided" }
+        outputFile?.parentFile?.mkdirs()
 
         // ── Probe audio source ────────────────────────────────────────────────
         var effectiveDurationSec = durationSeconds
         var sourceAudioFormat: MediaFormat? = null
+        var audioPath = AudioPath.DECODE_REENCODE_COMPRESSED
+        val audioSourceUri: Uri? = audioFile?.uri
 
         if (audioSourceUri != null) {
-            val fmt = detectAudioFormat(audioSourceUri)
-                ?: throw IllegalStateException("No audio track found in the selected file.")
-            val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
-            if (mime != MediaFormat.MIMETYPE_AUDIO_AAC) {
-                throw IllegalArgumentException(
-                    "Audio format '$mime' requires re-encoding, not yet supported. " +
-                        "Use an .m4a, .aac, or .mp4 audio file."
-                )
+            // Single extractor: select track first, then get format so CSD-0/CSD-1 are populated.
+            val extractor = MediaExtractor()
+            extractor.setDataSource(context, audioSourceUri, null)
+            var audioTrackIdx = -1
+            for (i in 0 until extractor.trackCount) {
+                if (extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    audioTrackIdx = i
+                    break
+                }
             }
-            Log.d(TAG, "Audio source: $mime (direct copy)")
+            if (audioTrackIdx < 0) {
+                extractor.release()
+                throw IllegalStateException("This audio file isn't readable on Android.")
+            }
+            extractor.selectTrack(audioTrackIdx)
+            val fmt = extractor.getTrackFormat(audioTrackIdx) // includes CSD after selectTrack
+            audioExtractor = extractor
+
             sourceAudioFormat = fmt
+            audioPath = chooseAudioPath(fmt)
+            val mime = fmt.getString(MediaFormat.KEY_MIME) ?: "unknown"
+            Log.d(TAG, "Audio source: $mime, path: $audioPath")
 
             val durationUs = if (fmt.containsKey(MediaFormat.KEY_DURATION))
                 fmt.getLong(MediaFormat.KEY_DURATION) else 0L
             if (durationUs > 0) effectiveDurationSec = durationUs / 1_000_000f
-            Log.d(TAG, "Audio duration: $effectiveDurationSec s, video frames: ${(effectiveDurationSec * fps).toInt()}")
-
-            val extractor = MediaExtractor()
-            extractor.setDataSource(context, audioSourceUri, null)
-            for (i in 0 until extractor.trackCount) {
-                val trackFmt = extractor.getTrackFormat(i)
-                if (trackFmt.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
-                    extractor.selectTrack(i)
-                    break
-                }
-            }
-            audioExtractor = extractor
+            Log.d(TAG, "Audio duration: ${effectiveDurationSec}s, frames: ${(effectiveDurationSec * fps).toInt()}")
         }
 
-        audioTrackReady = (audioSourceUri == null)   // no audio = don't wait for audio track
+        audioTrackReady = (audioFile == null)
 
         // ── Video encoder ─────────────────────────────────────────────────────
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
@@ -126,60 +148,84 @@ class Mp4Exporter(
         renderer.onSurfaceCreated(null, null)
         renderer.onSurfaceChanged(null, width, height)
 
-        muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val modeCfg = skinConfigForMode(exportMode)
+        renderer.audioUniforms.activePainter = modeCfg.painter
+        renderer.skinIndex      = modeCfg.skinIndex
+        renderer.kaleidoFolds   = modeCfg.folds
+        renderer.ribbonColor[0] = modeCfg.rr
+        renderer.ribbonColor[1] = modeCfg.rg
+        renderer.ribbonColor[2] = modeCfg.rb
+        renderer.beatThreshold  = modeCfg.beatThreshold
+        renderer.userSkinFilePath = if (exportMode is Mode.UserSlot) userSkinFilePath else null
 
-        // Add the audio track now so it's registered before muxer.start().
-        // muxer.start() is called inside maybeStartMuxer() once the video track
-        // also fires INFO_OUTPUT_FORMAT_CHANGED inside drainEncoder.
-        if (sourceAudioFormat != null) {
-            audioMuxTrackIndex = muxer.addTrack(sourceAudioFormat)
-            audioTrackReady = true
-            Log.d(TAG, "Audio track added to muxer: index=$audioMuxTrackIndex")
+        muxer = if (outputFd != null) {
+            MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        } else {
+            MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        }
+
+        // ── Audio track registration ──────────────────────────────────────────
+        val srcFmt = sourceAudioFormat
+        if (srcFmt != null) {
+            setupReencodeAudio(srcFmt, audioPath)
         }
 
         val totalFrames = (effectiveDurationSec * fps).toInt()
         val dt          = 1f / fps.toFloat()
         val silentSnap  = AudioSnapshot(FloatArray(8), 0f, false)
-        Log.d(TAG, "Starting encode: ${width}x${height} @ ${fps}fps, $totalFrames frames")
+
+        onProgress(0f, "Analyzing audio…")
+        val analyzedSnapshots: List<AudioSnapshot>? = audioFile?.let { af ->
+            analyzeOffline(af, totalFrames)
+        }
+        Log.d(TAG, "Encode start: ${width}x${height} @${fps}fps $totalFrames frames snapshots=${analyzedSnapshots?.size ?: 0}")
 
         try {
             for (frameIndex in 0 until totalFrames) {
+                currentCoroutineContext().ensureActive()
+
                 val presentationTimeUs = frameIndex * 1_000_000L / fps
                 val timeSec            = frameIndex * dt
 
+                val snap = if (beatResponseEnabled) analyzedSnapshots?.getOrNull(frameIndex) ?: silentSnap
+                           else silentSnap
                 renderer.renderFrame(
                     surfaceWidth  = width,
                     surfaceHeight = height,
                     timeSec       = timeSec,
                     dt            = dt,
-                    audioSnapshot = silentSnap,
-                    mode          = Mode.Cyclone,
+                    audioSnapshot = snap,
+                    mode          = exportMode,
                 )
 
                 EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeUs * 1000L)
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)
                 drainEncoder(endOfStream = false)
 
-                // Pump audio in lockstep with video — single-threaded, no concurrent muxer access.
                 if (muxerStarted && audioExtractor != null) {
-                    pumpAudioDirectCopy(uptoUs = presentationTimeUs)
+                    when (audioPath) {
+                        AudioPath.DECODE_REENCODE_PCM        -> pumpAudioReencodePcm()
+                        AudioPath.DECODE_REENCODE_COMPRESSED -> pumpAudioReencodeCompressed()
+                    }
                 }
 
-                onProgress(frameIndex.toFloat() / totalFrames)
+                onProgress(frameIndex.toFloat() / totalFrames, "Encoding video…")
                 if (frameIndex % 60 == 0) Log.d(TAG, "Frame $frameIndex / $totalFrames")
             }
 
             drainEncoder(endOfStream = true)
+            if (audioExtractor != null) finishAudioDrain(audioPath)
 
-            // Flush any audio that trails the last video frame.
-            if (muxerStarted && audioExtractor != null) {
-                pumpAudioDirectCopy(uptoUs = Long.MAX_VALUE)
-            }
-
-            Log.d(TAG, "Encode complete: ${outputFile.length()} bytes")
+            Log.d(TAG, "Encode complete: ${outputFile?.length() ?: "(fd)"}")
         } finally {
             audioExtractor?.release()
             audioExtractor = null
+            runCatching { audioDecoder?.stop() }
+            audioDecoder?.release()
+            audioDecoder = null
+            runCatching { audioEncoder?.stop() }
+            audioEncoder?.release()
+            audioEncoder = null
             renderer.release()
             releaseEgl()
             runCatching { encoder.stop() }
@@ -190,23 +236,243 @@ class Mp4Exporter(
         }
     }
 
-    // Called after each track signals its format — starts muxer once both tracks are ready.
+    // ── Audio path selection ──────────────────────────────────────────────────
+
+    private fun chooseAudioPath(format: MediaFormat): AudioPath {
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: return AudioPath.DECODE_REENCODE_COMPRESSED
+        return when (mime) {
+            "audio/raw", "audio/x-wav" -> AudioPath.DECODE_REENCODE_PCM
+            else                       -> AudioPath.DECODE_REENCODE_COMPRESSED
+        }
+    }
+
+    // ── Re-encode setup ───────────────────────────────────────────────────────
+
+    private fun setupReencodeAudio(srcFmt: MediaFormat, path: AudioPath) {
+        val sampleRate   = srcFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        val channelCount = srcFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+
+        val aacFormat = MediaFormat.createAudioFormat(
+            MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channelCount
+        ).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, AUDIO_AAC_BITRATE)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1024 * 1024)
+        }
+        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        enc.configure(aacFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.start()
+        audioEncoder = enc
+
+        if (path == AudioPath.DECODE_REENCODE_COMPRESSED) {
+            val mime = srcFmt.getString(MediaFormat.KEY_MIME)!!
+            val dec = MediaCodec.createDecoderByType(mime)
+            dec.configure(srcFmt, null, null, 0)
+            dec.start()
+            audioDecoder = dec
+        }
+
+        // Prime: poll encoder output until INFO_OUTPUT_FORMAT_CHANGED fires.
+        // Most AAC encoders emit this immediately after start() without needing any input.
+        Log.d(TAG, "Priming audio encoder for output format…")
+        val primeDeadline = System.currentTimeMillis() + 5_000L
+        val bufInfo = MediaCodec.BufferInfo()
+        while (!audioTrackReady && System.currentTimeMillis() < primeDeadline) {
+            val idx = enc.dequeueOutputBuffer(bufInfo, 100_000L)
+            when {
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    audioMuxTrackIndex = muxer.addTrack(enc.outputFormat)
+                    audioTrackReady = true
+                    Log.d(TAG, "Audio track (reencode) added: index=$audioMuxTrackIndex")
+                }
+                idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    // Encoder needs input to emit its format on this device; nudge it.
+                    when (path) {
+                        AudioPath.DECODE_REENCODE_COMPRESSED -> { feedDecoderInput(); drainDecoderToEncoder() }
+                        AudioPath.DECODE_REENCODE_PCM        -> feedEncoderInputFromExtractor()
+                        else -> {}
+                    }
+                }
+                idx >= 0 -> enc.releaseOutputBuffer(idx, false) // early output before muxer; discard
+            }
+        }
+        if (!audioTrackReady) error("Audio encoder failed to emit output format within 5s")
+    }
+
+    // ── Per-frame pump functions ──────────────────────────────────────────────
+
+    private fun pumpAudioReencodeCompressed() {
+        feedDecoderInput()
+        drainDecoderToEncoder()
+        drainAudioEncoderToMuxer()
+    }
+
+    private fun pumpAudioReencodePcm() {
+        feedEncoderInputFromExtractor()
+        drainAudioEncoderToMuxer()
+    }
+
+    // ── Audio pipeline primitives ─────────────────────────────────────────────
+
+    private fun feedDecoderInput() {
+        if (decoderEosReached) return
+        val ext = audioExtractor ?: return
+        val dec = audioDecoder ?: return
+        val idx = dec.dequeueInputBuffer(0L)
+        if (idx < 0) return
+        val buf = dec.getInputBuffer(idx) ?: return
+        val size = ext.readSampleData(buf, 0)
+        if (size < 0) {
+            dec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            decoderEosReached = true
+        } else {
+            dec.queueInputBuffer(idx, 0, size, ext.sampleTime, ext.sampleFlags)
+            ext.advance()
+        }
+    }
+
+    private fun drainDecoderToEncoder() {
+        if (encoderEosSignaled) return
+        val dec = audioDecoder ?: return
+        val enc = audioEncoder ?: return
+        val info = MediaCodec.BufferInfo()
+        while (true) {
+            val outIdx = dec.dequeueOutputBuffer(info, 0L)
+            when {
+                outIdx == MediaCodec.INFO_TRY_AGAIN_LATER ||
+                outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> break
+                outIdx >= 0 -> {
+                    val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                    val pcm = dec.getOutputBuffer(outIdx)
+                    if (pcm != null && info.size > 0) {
+                        val encIdx = enc.dequeueInputBuffer(10_000L)
+                        if (encIdx >= 0) {
+                            val encBuf = enc.getInputBuffer(encIdx)!!
+                            encBuf.clear()
+                            pcm.position(info.offset)
+                            pcm.limit(info.offset + info.size)
+                            encBuf.put(pcm)
+                            val flags = if (eos) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
+                            enc.queueInputBuffer(encIdx, 0, info.size, info.presentationTimeUs, flags)
+                            if (eos) encoderEosSignaled = true
+                        }
+                    }
+                    dec.releaseOutputBuffer(outIdx, false)
+                    if (eos) {
+                        if (!encoderEosSignaled) {
+                            val encIdx = enc.dequeueInputBuffer(10_000L)
+                            if (encIdx >= 0) {
+                                enc.queueInputBuffer(encIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                encoderEosSignaled = true
+                            }
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private fun feedEncoderInputFromExtractor() {
+        if (encoderEosSignaled) return
+        val ext = audioExtractor ?: return
+        val enc = audioEncoder ?: return
+        val idx = enc.dequeueInputBuffer(0L)
+        if (idx < 0) return
+        val buf = enc.getInputBuffer(idx)!!
+        buf.clear()
+        val size = ext.readSampleData(buf, 0)
+        if (size < 0) {
+            enc.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            encoderEosSignaled = true
+        } else {
+            enc.queueInputBuffer(idx, 0, size, ext.sampleTime, 0)
+            ext.advance()
+        }
+    }
+
+    private fun drainAudioEncoderToMuxer() {
+        if (encoderEosReached) return
+        val enc = audioEncoder ?: return
+        val info = MediaCodec.BufferInfo()
+        while (true) {
+            val outIdx = enc.dequeueOutputBuffer(info, 0L)
+            when {
+                outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> break
+                outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (!audioTrackReady) {
+                        audioMuxTrackIndex = muxer.addTrack(enc.outputFormat)
+                        audioTrackReady = true
+                        maybeStartMuxer()
+                    }
+                }
+                outIdx >= 0 -> {
+                    val buf = enc.getOutputBuffer(outIdx)
+                    if (buf != null) {
+                        if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) info.size = 0
+                        if (info.size > 0 && muxerStarted) {
+                            buf.position(info.offset)
+                            buf.limit(info.offset + info.size)
+                            muxer.writeSampleData(audioMuxTrackIndex, buf, info)
+                        }
+                    }
+                    enc.releaseOutputBuffer(outIdx, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        encoderEosReached = true
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    // ── End-of-stream audio drain ─────────────────────────────────────────────
+
+    private fun finishAudioDrain(path: AudioPath) {
+        val deadline = System.currentTimeMillis() + 10_000L
+        when (path) {
+            AudioPath.DECODE_REENCODE_PCM -> {
+                while (!encoderEosReached && System.currentTimeMillis() < deadline) {
+                    if (!encoderEosSignaled) feedEncoderInputFromExtractor()
+                    drainAudioEncoderToMuxer()
+                }
+            }
+            AudioPath.DECODE_REENCODE_COMPRESSED -> {
+                while (!encoderEosReached && System.currentTimeMillis() < deadline) {
+                    if (!decoderEosReached) feedDecoderInput()
+                    if (!encoderEosSignaled) drainDecoderToEncoder()
+                    drainAudioEncoderToMuxer()
+                }
+            }
+        }
+        if (!encoderEosReached) {
+            Log.w(TAG, "Audio drain timed out — some trailing audio may be missing")
+        }
+    }
+
+    // ── Muxer start gate ──────────────────────────────────────────────────────
+
     private fun maybeStartMuxer() {
         if (videoTrackReady && audioTrackReady && !muxerStarted) {
             muxer.start()
             muxerStarted = true
-            Log.d(TAG, "Muxer started: videoTrack=$videoMuxTrackIndex audioTrack=$audioMuxTrackIndex")
+            Log.d(TAG, "Muxer started: video=$videoMuxTrackIndex audio=$audioMuxTrackIndex")
         }
     }
 
-    // Returns the MediaFormat of the first audio track in the given URI, or null.
+    // ── Audio format detection ────────────────────────────────────────────────
+
     private fun detectAudioFormat(uri: Uri): MediaFormat? {
         val extractor = MediaExtractor()
         return try {
             extractor.setDataSource(context, uri, null)
             for (i in 0 until extractor.trackCount) {
                 val fmt = extractor.getTrackFormat(i)
-                if (fmt.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) return fmt
+                if (fmt.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    // selectTrack then re-fetch so CSD-0/CSD-1 are populated in the format.
+                    extractor.selectTrack(i)
+                    return extractor.getTrackFormat(i)
+                }
             }
             null
         } catch (e: Exception) {
@@ -217,27 +483,7 @@ class Mp4Exporter(
         }
     }
 
-    // Pumps audio samples from audioExtractor into the muxer up to uptoUs (inclusive).
-    // Extractor position advances; subsequent calls continue from where the last left off.
-    private fun pumpAudioDirectCopy(uptoUs: Long) {
-        val ext  = audioExtractor ?: return
-        val info = MediaCodec.BufferInfo()
-        while (true) {
-            val sampleTime = ext.sampleTime
-            if (sampleTime < 0 || sampleTime > uptoUs) break
-            audioPumpBuffer.clear()
-            val size = ext.readSampleData(audioPumpBuffer, 0)
-            if (size < 0) break
-            info.offset            = 0
-            info.size              = size
-            info.presentationTimeUs = sampleTime
-            info.flags             = ext.sampleFlags
-            audioPumpBuffer.position(0)
-            audioPumpBuffer.limit(size)
-            muxer.writeSampleData(audioMuxTrackIndex, audioPumpBuffer, info)
-            if (!ext.advance()) break
-        }
-    }
+    // ── EGL ───────────────────────────────────────────────────────────────────
 
     private fun setupEgl(inputSurface: Surface) {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -283,6 +529,8 @@ class Mp4Exporter(
         if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
         EGL14.eglTerminate(eglDisplay)
     }
+
+    // ── Video encoder drain ───────────────────────────────────────────────────
 
     private fun drainEncoder(endOfStream: Boolean) {
         if (endOfStream) encoder.signalEndOfInputStream()

@@ -51,3 +51,11 @@ fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
 
     return AudioSnapshot(bands = bands, peak = env[center], isBeat = isBeat)
 }
+
+fun analyzeOffline(audioFile: AudioFile, totalFrames: Int): List<AudioSnapshot> {
+    if (totalFrames <= 0) return emptyList()
+    return List(totalFrames) { i ->
+        val fraction = if (totalFrames > 1) i.toFloat() / (totalFrames - 1) else 0f
+        snapshotAt(audioFile, fraction)
+    }
+}
