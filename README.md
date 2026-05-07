@@ -107,13 +107,15 @@ Any new visualizer concept can be expressed as a painter plugged into the same s
 
 ## What's planned
 
-- More built-in skins from a curated source (DeviantArt, own renders)
-- Per-user-skin tuning: fold count, ribbon color, beat threshold set in-app rather than hardcoded
+- More built-in skins from a curated DeviantArt gallery
+- Per-user-skin tuning UI: fold count, ribbon color, beat threshold set in-app rather than hardcoded
 - Distortion variants applied to skins: mirror, hue-shift, rotation
-- Real FFT for the audio analyzer — 8 genuinely independent bands
-- Additional visualizer concepts on the same chassis (BeatStrobe, Scanline, MP4Painter)
-- MP4 export via MediaCodec surface encode
-- First-launch onboarding polish
+- **Offline MP4 export.** Render a visualizer session to a video file with the audio track muxed
+  in, at selectable resolutions (720p / 1080p / 4K). The Python sibling project does this as its
+  primary output mode; the Android engine currently only displays live. Bringing offline render to
+  Android closes the loop — users can share visualizations as videos, post to YouTube/social, etc.
+- Additional visualizer concepts on the same chassis
+- First-launch tutorial / onboarding polish
 
 ---
 
