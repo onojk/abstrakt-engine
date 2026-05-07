@@ -292,13 +292,14 @@ internal object Shaders {
         #version 300 es
         precision mediump float;
 
-        const float PI       = 3.14159265;
-        const int   SEGMENTS = 12;
+        const float PI = 3.14159265;
 
         uniform sampler2D u_content;
         uniform vec2      u_resolution;
         uniform float     u_kaleido_rotation;
         uniform float     u_cyclone_angle;
+        uniform vec2      u_shake;
+        uniform float     u_kaleido_folds;
 
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -310,8 +311,7 @@ internal object Shaders {
             float r     = length(centered);
             float theta = atan(centered.y, centered.x) + u_kaleido_rotation;
 
-            // 12-fold symmetry
-            float segAngle = 2.0 * PI / float(SEGMENTS);
+            float segAngle = 2.0 * PI / u_kaleido_folds;
             theta = mod(theta, segAngle);
             if (theta > segAngle * 0.5) theta = segAngle - theta;
 
@@ -320,9 +320,13 @@ internal object Shaders {
             float thetaU = (theta / (2.0 * PI)) * 2.0;
             float radial = r * 1.9;
 
+            // Beat shake: offset sampling UV in lockstep with cylinder translate.
+            // Applied after the fold so 12-fold symmetry is preserved.
+            vec2 shakeOff = u_shake / 12.0;
+
             vec2 sampleUV = vec2(
-                fract(frontU + thetaU),
-                clamp(radial, 0.0, 1.0)
+                fract(frontU + thetaU + shakeOff.x),
+                clamp(radial + shakeOff.y, 0.0, 1.0)
             );
 
             vec4 kaleido = texture(u_content, sampleUV);
@@ -368,7 +372,7 @@ internal object Shaders {
         }
 
         void main() {
-            vec2 fboSize = vec2(1024.0, 256.0);
+            vec2 fboSize = vec2(4096.0, 256.0);
             vec2 px      = v_uv * fboSize;
 
             float jobIndex = floor(u_time / JOB_DURATION);
@@ -427,7 +431,7 @@ internal object Shaders {
             // One revolution advances the image window by (FBO_width / image_width).
             // For 4096-wide image: window advances 0.25 per revolution → 4 revs per cycle.
             float rotationProgress  = u_cyclone_angle / (2.0 * PI);
-            float fboFractionOfImage = 1024.0 / u_image_width;
+            float fboFractionOfImage = 4096.0 / u_image_width;
             float sourceU = rotationProgress + v_uv.x * fboFractionOfImage;
 
             // GL_REPEAT wraps sourceU for values outside [0,1].
@@ -524,6 +528,92 @@ internal object Shaders {
             float fade = smoothstep(0.0, 0.08, r) * (1.0 - smoothstep(0.85, 1.0, r));
 
             fragColor = vec4(result * edgeAA * fade, 1.0);
+        }
+    """.trimIndent()
+
+    val BLIT_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform sampler2D u_tex;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        void main() { fragColor = texture(u_tex, v_uv); }
+    """.trimIndent()
+
+    // Runs in painter-texture UV space (1024×256).
+    // v_uv.x = angle 0..1 (= 0..2π around the mandala).
+    // v_uv.y = radial 0..1 (kaleido samples this as r = v / 1.9).
+    // Ribbons are horizontal sinusoidal waves at target V positions;
+    // the kaleido 12-fold fold provides all angular replication.
+    val RIBBON_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const float TRAIL_DECAY = 0.992;
+        const float TWO_PI      = 6.28318530718;
+
+        uniform vec2      u_resolution;
+        uniform float     u_time;
+        uniform float     u_bands[8];
+        uniform vec4      u_collapse;
+        uniform vec3      u_ribbon_color;
+        uniform sampler2D u_trail;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        void main() {
+            // Polar-unwrap space: x=angle, y=radius
+            float theta = v_uv.x * TWO_PI;
+            float v     = v_uv.y;
+
+            float bass    = (u_bands[0] + u_bands[1]) * 0.5;
+            float mid     = (u_bands[2] + u_bands[3] + u_bands[4]) / 3.0;
+            float treble  = (u_bands[5] + u_bands[6] + u_bands[7]) / 3.0;
+            float overall = (bass + mid + treble) / 3.0;
+
+            // base* = target V in painter texture = target_kaleido_r * 1.9
+            // kaleido radii: 0.16, 0.26, 0.38, 0.47  →  V: 0.30, 0.50, 0.72, 0.90
+            float base0 = mix(0.30, 0.0, u_collapse[0]);
+            float base1 = mix(0.50, 0.0, u_collapse[1]);
+            float base2 = mix(0.72, 0.0, u_collapse[2]);
+            float base3 = mix(0.90, 0.0, u_collapse[3]);
+
+            // Harmonic variation — no cos(12θ), kaleido fold provides symmetry
+            float curveV0 = base0 * (1.0 + 0.08*cos(2.0*theta + u_time*0.2) + bass*0.10);
+            float curveV1 = base1 * (1.0 + 0.10*cos(4.0*theta - u_time*0.3) + mid*0.10);
+            float curveV2 = base2 * (1.0 + 0.06*cos(6.0*theta + u_time*0.4) + treble*0.08);
+            float curveV3 = base3 * (1.0 + 0.05*cos(2.0*theta - u_time*0.15) + overall*0.06);
+
+            float maxCollapse = max(max(u_collapse[0], u_collapse[1]), max(u_collapse[2], u_collapse[3]));
+            float coreHalfPx  = mix(1.0, 2.5, maxCollapse);
+            float coreHalf    = coreHalfPx / u_resolution.y;
+
+            float line0 = 1.0 - smoothstep(0.0, coreHalf, abs(v - curveV0));
+            float line1 = 1.0 - smoothstep(0.0, coreHalf, abs(v - curveV1));
+            float line2 = 1.0 - smoothstep(0.0, coreHalf, abs(v - curveV2));
+            float line3 = 1.0 - smoothstep(0.0, coreHalf, abs(v - curveV3));
+
+            float lineIntensity = clamp(line0 + line1 + line2 + line3, 0.0, 1.0);
+
+            vec4  prev         = texture(u_trail, v_uv);
+            float decayedAlpha = prev.a * TRAIL_DECAY;
+            float outA         = min(max(decayedAlpha, lineIntensity * 1.3), 1.0);
+
+            fragColor = vec4(u_ribbon_color, outA);
+        }
+    """.trimIndent()
+
+    // Skin painter: directly samples the skin texture 1:1 (4096×256 skin → 4096×256 FBO).
+    // GL_REPEAT on S is set on the skin texture at load time so edges tile cleanly.
+    val PAINTER_SKIN_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform sampler2D u_skin;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        void main() {
+            fragColor = vec4(texture(u_skin, v_uv).rgb, 1.0);
         }
     """.trimIndent()
 }

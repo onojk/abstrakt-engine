@@ -5,6 +5,7 @@ enum class Painter(val label: String) {
     AUDIO_PAINT("Audio"),
     PRINT_HEAD("Print"),
     IMAGE("Image"),
+    SKIN("Skin"),
 }
 
 internal data class PainterEntry(
@@ -18,4 +19,5 @@ internal fun allPainters(): List<PainterEntry> = listOf(
     PainterEntry(Painter.AUDIO_PAINT, Shaders.PAINTER_VERT, Shaders.PAINTER_AUDIOPAINT_FRAG),
     PainterEntry(Painter.PRINT_HEAD,  Shaders.PAINTER_VERT, Shaders.PAINTER_PRINTHEAD_FRAG),
     PainterEntry(Painter.IMAGE,       Shaders.PAINTER_VERT, Shaders.PAINTER_IMAGE_FRAG),
+    PainterEntry(Painter.SKIN,        Shaders.PAINTER_VERT, Shaders.PAINTER_SKIN_FRAG),
 )

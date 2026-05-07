@@ -37,6 +37,9 @@ internal class ShaderProgram(vertSrc: String, fragSrc: String) {
     fun setInt(name: String, v: Int) =
         GLES30.glUniform1i(GLES30.glGetUniformLocation(id, name), v)
 
+    fun setVec3(name: String, r: Float, g: Float, b: Float) =
+        GLES30.glUniform3f(GLES30.glGetUniformLocation(id, name), r, g, b)
+
     fun setVec4(name: String, r: Float, g: Float, b: Float, a: Float) =
         GLES30.glUniform4f(GLES30.glGetUniformLocation(id, name), r, g, b, a)
 

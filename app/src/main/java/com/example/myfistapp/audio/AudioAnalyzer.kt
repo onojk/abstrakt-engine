@@ -37,7 +37,7 @@ fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
     val high = abs(env[next] - env[prev]).coerceAtMost(1f)
 
     val slowAvg = avg(60)
-    val isBeat  = env[center] > slowAvg * 1.4f && env[center] > 0.25f
+    val isBeat  = env[center] > slowAvg * 1.4f && env[center] > 0.10f
 
     val bands = FloatArray(8) { i ->
         when (i) {
