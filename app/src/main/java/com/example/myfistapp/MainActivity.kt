@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -163,6 +164,7 @@ private fun VisualizerScreen() {
     var isPlaying        by remember { mutableStateOf(false) }
     var playbackFraction by remember { mutableFloatStateOf(0f) }
     var currentMode      by remember { mutableStateOf<Mode>(Mode.Cyclone) }
+    var isExporting      by remember { mutableStateOf(false) }
     var registryVersion  by remember { mutableIntStateOf(0) }
     var showCropper      by remember { mutableStateOf(false) }
     var pendingPhotoUri  by remember { mutableStateOf<Uri?>(null) }
@@ -564,6 +566,43 @@ private fun VisualizerScreen() {
                         text = if (isPlaying) "Pause" else "Play",
                         color = Color.Black,
                         fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            if (BuildConfig.DEBUG) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (!isExporting) {
+                            isExporting = true
+                            Toast.makeText(context, "Exporting test MP4...", Toast.LENGTH_SHORT).show()
+                            val outputFile = File(context.filesDir, "exports/test_${System.currentTimeMillis()}.mp4")
+                            scope.launch {
+                                val exporter = Mp4Exporter(context, outputFile, width = 1920, height = 1080, audioSourceUri = audioFile?.uri)
+                                val result = exporter.exportVisualizer { progress ->
+                                    Log.d("Mp4Exporter", "Progress: ${(progress * 100).toInt()}%")
+                                }
+                                isExporting = false
+                                result.fold(
+                                    onSuccess = { file ->
+                                        Toast.makeText(context, "Done: ${file.absolutePath}", Toast.LENGTH_LONG).show()
+                                    },
+                                    onFailure = { e ->
+                                        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                        Log.e("Mp4Exporter", "Export error", e)
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    enabled = !isExporting,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333340)),
+                ) {
+                    Text(
+                        text = if (isExporting) "Exporting..." else "Export Test MP4",
+                        color = DimWhite,
+                        fontSize = 12.sp,
                     )
                 }
             }

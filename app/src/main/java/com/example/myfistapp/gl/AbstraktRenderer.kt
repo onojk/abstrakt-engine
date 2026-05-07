@@ -9,6 +9,7 @@ import android.opengl.Matrix
 import android.util.Log
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.AudioSnapshot
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.microedition.khronos.egl.EGLConfig
@@ -385,6 +386,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         Log.d(TAG, "ribbonFBOs created: ${w}x${h} A=$ribbonFboA B=$ribbonFboB")
     }
 
+    // ── Screen draw callback — thin wrapper; CYCLONE delegates to renderFrame. ──
+
     override fun onDrawFrame(gl: GL10?) {
         val nowNs = System.nanoTime()
         if (startTimeNs == 0L) { startTimeNs = nowNs; lastFrameNs = nowNs }
@@ -422,7 +425,6 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
                 val prog = driftProgram ?: return
                 val snap = audioUniforms.getSnapshot()
-                // Spike beatDecay to 1.0 on beat, then decay with τ ≈ 200ms.
                 beatDecay = if (snap.isBeat) 1.0f
                             else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
                                 .coerceAtLeast(0f)
@@ -435,243 +437,303 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             }
 
             GlVizMode.CYCLONE -> {
-                // ── Mode-change: stamp full skin or clear FBO on every mode switch ─
-                val snapMode = currentMode  // single volatile read
-                if (snapMode != lastStampedMode) {
-                    if (snapMode is Mode.Builtin || snapMode is Mode.UserSlot) {
-                        if (stampFullSkinIntoPainterFbo(snapMode)) lastStampedMode = snapMode
-                        // If stamp returns false (user skin not cached yet), leave
-                        // lastStampedMode stale so we retry next frame.
-                    } else {
-                        // Cyclone: wipe painter FBO so no skin remnants bleed through.
-                        clearPainterFbo()
-                        lastStampedMode = snapMode
-                    }
-                }
-
-                val snap  = audioUniforms.getSnapshot()
-                beatDecay = if (snap.isBeat) 1.0f
-                            else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
-                                .coerceAtLeast(0f)
-                if (snap.isBeat) Log.d(TAG, "BEAT! peak=${snap.peak} beatDecay=$beatDecay")
-
-                val cProg = cycloneProgram ?: return
-                val pProg = painterPrograms[audioUniforms.activePainter] ?: return
-                val rProg = ribbonProgram
-                val bProg = blitProgram
-
-                // Advance rotation: 2π radians per 30 seconds.
-                cycloneAngleRad += dt * (2f * Math.PI.toFloat() / 30f)
-
-                // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
-                val shakeAmp = beatDecay * 0.35f
-                val shakeX   = (shakeAmp * Math.sin(timeSec * 53.0)).toFloat()
-                val shakeY   = (shakeAmp * Math.sin(timeSec * 45.0 + 1.3)).toFloat()
-
-                // ── Collapse animation update ──────────────────────────────────
-                val riBass    = (snap.bands[0] + snap.bands[1]) * 0.5f
-                val riMid     = (snap.bands[2] + snap.bands[3] + snap.bands[4]) / 3.0f
-                val riTreble  = (snap.bands[5] + snap.bands[6] + snap.bands[7]) / 3.0f
-                val riOverall = (riBass + riMid + riTreble) / 3.0f
-                val riAmps    = floatArrayOf(riBass, riMid, riTreble, riOverall)
-
-                for (i in 0..3) {
-                    val canTrigger = collapsePhase[i] == 0f
-                    if (snap.isBeat && riAmps[i] > beatThreshold && canTrigger) {
-                        collapsePhase[i] = 1.0f
-                        collapseTimer[i] = 0f
-                    }
-                    if (collapsePhase[i] > 0f || collapseTimer[i] > 0f) {
-                        collapseTimer[i] += dt
-                        val t = (collapseTimer[i] / 2.0f).coerceIn(0f, 1f)
-                        collapseState[i] = Math.sin(t * Math.PI).toFloat()
-                        if (collapseTimer[i] >= 2.0f) {
-                            collapsePhase[i] = 0f
-                            collapseState[i] = 0f
-                            collapseTimer[i] = 0f
-                        }
-                    }
-                }
-
-                // ── Ribbon scratch update (painter-texture space 1024×256) ─────
-                val scratchReadTex  = if (ribbonReadIsA) ribbonTexA else ribbonTexB
-                val scratchWriteFbo = if (ribbonReadIsA) ribbonFboB else ribbonFboA
-                val scratchWriteTex = if (ribbonReadIsA) ribbonTexB else ribbonTexA
-
-                if (rProg != null && ribbonFboA != 0 && ribbonFboB != 0) {
-                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, scratchWriteFbo)
-                    GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
-                    GLES30.glClearColor(0f, 0f, 0f, 0f)
-                    GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-                    GLES30.glDisable(GLES30.GL_DEPTH_TEST)
-                    GLES30.glDisable(GLES30.GL_CULL_FACE)
-                    GLES30.glDisable(GLES30.GL_BLEND)
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, scratchReadTex)
-                    rProg.use()
-                    rProg.setVec2("u_resolution", PAINTER_TEX_W.toFloat(), PAINTER_TEX_H.toFloat())
-                    rProg.setFloat("u_time", timeSec)
-                    rProg.setFloatArray("u_bands", snap.bands)
-                    rProg.setVec4("u_collapse",
-                        collapseState[0], collapseState[1],
-                        collapseState[2], collapseState[3])
-                    rProg.setVec3("u_ribbon_color", ribbonColor[0], ribbonColor[1], ribbonColor[2])
-                    rProg.setInt("u_trail", 0)
-                    drawQuad()
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-                }
-                ribbonReadIsA = !ribbonReadIsA
-
-                // ── Pass 1: Painter — write a hue stripe at the rear angle ────
-                // Rear is 270° past front (front = α+π/2, rear = α+3π/2).
-                val rearU = ((cycloneAngleRad + 3.0 * Math.PI / 2.0)
-                    .mod(2.0 * Math.PI) / (2.0 * Math.PI)).toFloat()
-                val rearX = (rearU * PAINTER_TEX_W).toInt().coerceIn(0, PAINTER_TEX_W - 1)
-                val endX  = rearX + PAINTER_STRIPE_W
-
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
-                GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
-                GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
-                // Blend enabled so painters that output alpha<1 leave existing FBO content intact.
-                GLES30.glEnable(GLES30.GL_BLEND)
-                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-                pProg.use()
-                // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
-                pProg.setFloat("u_time", timeSec)
-                pProg.setFloat("u_peak", snap.peak)
-                pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
-                pProg.setFloat("u_beat_decay", beatDecay)
-                pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
-                pProg.setFloat("u_cyclone_angle", cycloneAngleRad)
-                pProg.setFloatArray("u_bands", snap.bands)
-                // IMAGE painter: bind source image to unit 1.
-                if (audioUniforms.activePainter == Painter.IMAGE && imageTexture != 0) {
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
-                    pProg.setInt("u_image", 1)
-                    pProg.setFloat("u_image_width", imageWidth.toFloat())
-                }
-                // SKIN painter: bind the selected skin texture to unit 0.
-                if (audioUniforms.activePainter == Painter.SKIN) {
-                    val sTex = if (skinIndex >= 0) {
-                        skinTextures.getOrElse(skinIndex) { 0 }
-                    } else {
-                        val path = userSkinFilePath
-                        if (path != null) userSkinTextureCache.getOrPut(path) { loadUserSkinTexture(path) }
-                        else 0
-                    }
-                    if (sTex != 0) {
-                        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sTex)
-                        pProg.setInt("u_skin", 0)
-                    }
-                }
-                if (endX <= PAINTER_TEX_W) {
-                    GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
-                    drawQuad()
-                } else {
-                    // Stripe wraps past the right edge — two scissored draws.
-                    GLES30.glScissor(rearX, 0, PAINTER_TEX_W - rearX, PAINTER_TEX_H)
-                    drawQuad()
-                    GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
-                    drawQuad()
-                }
-                if (audioUniforms.activePainter == Painter.IMAGE) {
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                }
-                if (audioUniforms.activePainter == Painter.SKIN) {
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                }
-                // Ribbon stamp: blend ribbon scratch into the same painter stripe.
-                // Black (RGB=0) with ribbon alpha composites over the fresh paint.
-                if (bProg != null && ribbonFboA != 0) {
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, scratchWriteTex)
-                    bProg.use()
-                    bProg.setInt("u_tex", 0)
-                    if (endX <= PAINTER_TEX_W) {
-                        GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
-                        drawQuad()
-                    } else {
-                        GLES30.glScissor(rearX, 0, PAINTER_TEX_W - rearX, PAINTER_TEX_H)
-                        drawQuad()
-                        GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
-                        drawQuad()
-                    }
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                }
-                GLES30.glDisable(GLES30.GL_BLEND)
-                GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-
-                // ── Pass 2: Cylinder — sample painter texture, draw 3D mesh ───
-                GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
-                GLES30.glClearColor(0.12f, 0.12f, 0.12f, 1f)
-                GLES30.glEnable(GLES30.GL_DEPTH_TEST)
-                GLES30.glEnable(GLES30.GL_CULL_FACE)
-                GLES30.glCullFace(GLES30.GL_BACK)
-                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
-
-                val modelM = FloatArray(16)
-                val viewM  = FloatArray(16)
-                val projM  = FloatArray(16)
-                val vpM    = FloatArray(16)
-                val mvpM   = FloatArray(16)
-
-                Matrix.setIdentityM(modelM, 0)
-                Matrix.translateM(modelM, 0, shakeX, shakeY, 0f)
-                Matrix.rotateM(modelM, 0,
-                    Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
-                Matrix.setLookAtM(viewM, 0,
-                    0f, 0f, 3f, 0f, 0f, 0f, 0f, 1f, 0f)
-                Matrix.perspectiveM(projM, 0, 45f, wW / wH, 0.1f, 100f)
-                Matrix.multiplyMM(vpM,  0, projM, 0, viewM,  0)
-                Matrix.multiplyMM(mvpM, 0, vpM,   0, modelM, 0)
-
-                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
-
-                cProg.use()
-                cProg.setMat4("u_mvp", mvpM)
-                cProg.setInt("u_painterTexture", 0)
-
-                GLES30.glBindVertexArray(cycloneVaoId)
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, cylinderVertexCount)
-                GLES30.glBindVertexArray(0)
-
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-
-                // Depth + cull off — kaleido is a fullscreen quad, ignores depth.
-                GLES30.glDisable(GLES30.GL_DEPTH_TEST)
-                GLES30.glDisable(GLES30.GL_CULL_FACE)
-
-                // ── Pass 3: Kaleido overlay — alpha-blended mandala over cylinder ──
-                val kProg = kaleidoProgram
-                if (kProg != null) {
-                    kaleidoRotationRad += dt * 0.05f
-                    GLES30.glEnable(GLES30.GL_BLEND)
-                    GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
-                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
-                    kProg.use()
-                    kProg.setInt("u_content", 0)
-                    kProg.setVec2("u_resolution", wW, wH)
-                    kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
-                    kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
-                    kProg.setVec2("u_shake", shakeX, shakeY)
-                    kProg.setFloat("u_kaleido_folds", kaleidoFolds)
-                    drawQuad()
-                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                    GLES30.glDisable(GLES30.GL_BLEND)
-                }
-
-                GLES30.glClearColor(0f, 0f, 0f, 1f)
+                renderFrame(
+                    surfaceWidth  = surfaceWidth,
+                    surfaceHeight = surfaceHeight,
+                    timeSec       = timeSec,
+                    dt            = dt,
+                    audioSnapshot = audioUniforms.getSnapshot(),
+                    mode          = currentMode,
+                )
             }
         }
+    }
+
+    // ── Pure render function — called by onDrawFrame (screen) and Mp4Exporter. ─
+    // Assumes a GL context is current. Does NOT call eglSwapBuffers.
+    // dt: elapsed seconds since previous frame (use 1f/fps for encoder, real dt for screen).
+
+    fun renderFrame(
+        surfaceWidth: Int,
+        surfaceHeight: Int,
+        timeSec: Float,
+        dt: Float,
+        audioSnapshot: AudioSnapshot?,
+        mode: Mode,
+    ) {
+        val wW   = surfaceWidth.toFloat()
+        val wH   = surfaceHeight.toFloat()
+        val snap = audioSnapshot ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+        // ── Mode-change: stamp full skin or clear FBO on mode switch ──────────
+        if (mode != lastStampedMode) {
+            if (mode is Mode.Builtin || mode is Mode.UserSlot) {
+                if (stampFullSkinIntoPainterFbo(mode)) lastStampedMode = mode
+            } else {
+                clearPainterFbo()
+                lastStampedMode = mode
+            }
+        }
+
+        beatDecay = if (snap.isBeat) 1.0f
+                    else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
+                        .coerceAtLeast(0f)
+        if (snap.isBeat) Log.d(TAG, "BEAT! peak=${snap.peak} beatDecay=$beatDecay")
+
+        val cProg = cycloneProgram ?: return
+        val pProg = painterPrograms[audioUniforms.activePainter] ?: return
+        val rProg = ribbonProgram
+        val bProg = blitProgram
+
+        // Advance rotation: 2π radians per 30 seconds.
+        cycloneAngleRad += dt * (2f * Math.PI.toFloat() / 30f)
+
+        // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
+        val shakeAmp = beatDecay * 0.35f
+        val shakeX   = (shakeAmp * Math.sin(timeSec * 53.0)).toFloat()
+        val shakeY   = (shakeAmp * Math.sin(timeSec * 45.0 + 1.3)).toFloat()
+
+        // ── Collapse animation update ─────────────────────────────────────────
+        val riBass    = (snap.bands[0] + snap.bands[1]) * 0.5f
+        val riMid     = (snap.bands[2] + snap.bands[3] + snap.bands[4]) / 3.0f
+        val riTreble  = (snap.bands[5] + snap.bands[6] + snap.bands[7]) / 3.0f
+        val riOverall = (riBass + riMid + riTreble) / 3.0f
+        val riAmps    = floatArrayOf(riBass, riMid, riTreble, riOverall)
+
+        for (i in 0..3) {
+            val canTrigger = collapsePhase[i] == 0f
+            if (snap.isBeat && riAmps[i] > beatThreshold && canTrigger) {
+                collapsePhase[i] = 1.0f
+                collapseTimer[i] = 0f
+            }
+            if (collapsePhase[i] > 0f || collapseTimer[i] > 0f) {
+                collapseTimer[i] += dt
+                val t = (collapseTimer[i] / 2.0f).coerceIn(0f, 1f)
+                collapseState[i] = Math.sin(t * Math.PI).toFloat()
+                if (collapseTimer[i] >= 2.0f) {
+                    collapsePhase[i] = 0f
+                    collapseState[i] = 0f
+                    collapseTimer[i] = 0f
+                }
+            }
+        }
+
+        // ── Ribbon scratch update (painter-texture space 4096×256) ────────────
+        val scratchReadTex  = if (ribbonReadIsA) ribbonTexA else ribbonTexB
+        val scratchWriteFbo = if (ribbonReadIsA) ribbonFboB else ribbonFboA
+        val scratchWriteTex = if (ribbonReadIsA) ribbonTexB else ribbonTexA
+
+        if (rProg != null && ribbonFboA != 0 && ribbonFboB != 0) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, scratchWriteFbo)
+            GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
+            GLES30.glClearColor(0f, 0f, 0f, 0f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+            GLES30.glDisable(GLES30.GL_CULL_FACE)
+            GLES30.glDisable(GLES30.GL_BLEND)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, scratchReadTex)
+            rProg.use()
+            rProg.setVec2("u_resolution", PAINTER_TEX_W.toFloat(), PAINTER_TEX_H.toFloat())
+            rProg.setFloat("u_time", timeSec)
+            rProg.setFloatArray("u_bands", snap.bands)
+            rProg.setVec4("u_collapse",
+                collapseState[0], collapseState[1],
+                collapseState[2], collapseState[3])
+            rProg.setVec3("u_ribbon_color", ribbonColor[0], ribbonColor[1], ribbonColor[2])
+            rProg.setInt("u_trail", 0)
+            drawQuad()
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        }
+        ribbonReadIsA = !ribbonReadIsA
+
+        // ── Pass 1: Painter — write a hue stripe at the rear angle ────────────
+        // Rear is 270° past front (front = α+π/2, rear = α+3π/2).
+        val rearU = ((cycloneAngleRad + 3.0 * Math.PI / 2.0)
+            .mod(2.0 * Math.PI) / (2.0 * Math.PI)).toFloat()
+        val rearX = (rearU * PAINTER_TEX_W).toInt().coerceIn(0, PAINTER_TEX_W - 1)
+        val endX  = rearX + PAINTER_STRIPE_W
+
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
+        GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
+        GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+        // Blend enabled so painters that output alpha<1 leave existing FBO content intact.
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        pProg.use()
+        // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
+        pProg.setFloat("u_time", timeSec)
+        pProg.setFloat("u_peak", snap.peak)
+        pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
+        pProg.setFloat("u_beat_decay", beatDecay)
+        pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
+        pProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+        pProg.setFloatArray("u_bands", snap.bands)
+        // IMAGE painter: bind source image to unit 1.
+        if (audioUniforms.activePainter == Painter.IMAGE && imageTexture != 0) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+            pProg.setInt("u_image", 1)
+            pProg.setFloat("u_image_width", imageWidth.toFloat())
+        }
+        // SKIN painter: bind the selected skin texture to unit 0.
+        if (audioUniforms.activePainter == Painter.SKIN) {
+            val sTex = if (skinIndex >= 0) {
+                skinTextures.getOrElse(skinIndex) { 0 }
+            } else {
+                val path = userSkinFilePath
+                if (path != null) userSkinTextureCache.getOrPut(path) { loadUserSkinTexture(path) }
+                else 0
+            }
+            if (sTex != 0) {
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sTex)
+                pProg.setInt("u_skin", 0)
+            }
+        }
+        if (endX <= PAINTER_TEX_W) {
+            GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
+            drawQuad()
+        } else {
+            // Stripe wraps past the right edge — two scissored draws.
+            GLES30.glScissor(rearX, 0, PAINTER_TEX_W - rearX, PAINTER_TEX_H)
+            drawQuad()
+            GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
+            drawQuad()
+        }
+        if (audioUniforms.activePainter == Painter.IMAGE) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        }
+        if (audioUniforms.activePainter == Painter.SKIN) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        }
+        // Ribbon stamp: blend ribbon scratch into the same painter stripe.
+        // Black (RGB=0) with ribbon alpha composites over the fresh paint.
+        if (bProg != null && ribbonFboA != 0) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, scratchWriteTex)
+            bProg.use()
+            bProg.setInt("u_tex", 0)
+            if (endX <= PAINTER_TEX_W) {
+                GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
+                drawQuad()
+            } else {
+                GLES30.glScissor(rearX, 0, PAINTER_TEX_W - rearX, PAINTER_TEX_H)
+                drawQuad()
+                GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
+                drawQuad()
+            }
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        }
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+        // ── Pass 2: Cylinder — sample painter texture, draw 3D mesh ──────────
+        GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+        GLES30.glClearColor(0.12f, 0.12f, 0.12f, 1f)
+        GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+        GLES30.glEnable(GLES30.GL_CULL_FACE)
+        GLES30.glCullFace(GLES30.GL_BACK)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+
+        val modelM = FloatArray(16)
+        val viewM  = FloatArray(16)
+        val projM  = FloatArray(16)
+        val vpM    = FloatArray(16)
+        val mvpM   = FloatArray(16)
+
+        Matrix.setIdentityM(modelM, 0)
+        Matrix.translateM(modelM, 0, shakeX, shakeY, 0f)
+        Matrix.rotateM(modelM, 0,
+            Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
+        Matrix.setLookAtM(viewM, 0,
+            0f, 0f, 3f, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.perspectiveM(projM, 0, 45f, wW / wH, 0.1f, 100f)
+        Matrix.multiplyMM(vpM,  0, projM, 0, viewM,  0)
+        Matrix.multiplyMM(mvpM, 0, vpM,   0, modelM, 0)
+
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+
+        cProg.use()
+        cProg.setMat4("u_mvp", mvpM)
+        cProg.setInt("u_painterTexture", 0)
+
+        GLES30.glBindVertexArray(cycloneVaoId)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, cylinderVertexCount)
+        GLES30.glBindVertexArray(0)
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+        // Depth + cull off — kaleido is a fullscreen quad, ignores depth.
+        GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+        GLES30.glDisable(GLES30.GL_CULL_FACE)
+
+        // ── Pass 3: Kaleido overlay — alpha-blended mandala over cylinder ─────
+        val kProg = kaleidoProgram
+        if (kProg != null) {
+            kaleidoRotationRad += dt * 0.05f
+            GLES30.glEnable(GLES30.GL_BLEND)
+            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+            kProg.use()
+            kProg.setInt("u_content", 0)
+            kProg.setVec2("u_resolution", wW, wH)
+            kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
+            kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+            kProg.setVec2("u_shake", shakeX, shakeY)
+            kProg.setFloat("u_kaleido_folds", kaleidoFolds)
+            drawQuad()
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            GLES30.glDisable(GLES30.GL_BLEND)
+        }
+
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+    }
+
+    // ── Release all GL resources — call from the same thread that owns the context. ──
+
+    fun release() {
+        testProgram?.delete();    testProgram    = null
+        warpProgram?.delete();    warpProgram    = null
+        driftProgram?.delete();   driftProgram   = null
+        cycloneProgram?.delete(); cycloneProgram = null
+        kaleidoProgram?.delete(); kaleidoProgram = null
+        painterPrograms.values.forEach { it.delete() }
+        painterPrograms.clear()
+        ribbonProgram?.delete(); ribbonProgram = null
+        blitProgram?.delete();   blitProgram   = null
+
+        if (vaoId        != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),        0); vaoId        = 0 }
+        if (vboId        != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),        0); vboId        = 0 }
+        if (cycloneVaoId != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(cycloneVaoId), 0); cycloneVaoId = 0 }
+        if (cycloneVboId != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(cycloneVboId), 0); cycloneVboId = 0 }
+
+        if (painterFBO     != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(painterFBO),     0); painterFBO     = 0 }
+        if (painterTexture != 0) { GLES30.glDeleteTextures(1,     intArrayOf(painterTexture), 0); painterTexture = 0 }
+        if (imageTexture   != 0) { GLES30.glDeleteTextures(1,     intArrayOf(imageTexture),   0); imageTexture   = 0 }
+
+        val nonZeroSkinTex = skinTextures.filter { it != 0 }
+        if (nonZeroSkinTex.isNotEmpty()) {
+            GLES30.glDeleteTextures(nonZeroSkinTex.size, nonZeroSkinTex.toIntArray(), 0)
+            skinTextures.fill(0)
+        }
+        val nonZeroUserTex = userSkinTextureCache.values.filter { it != 0 }
+        if (nonZeroUserTex.isNotEmpty()) {
+            GLES30.glDeleteTextures(nonZeroUserTex.size, nonZeroUserTex.toIntArray(), 0)
+        }
+        userSkinTextureCache.clear()
+
+        destroyRibbonFBOs()
+        destroyFBO()
+
+        Log.d(TAG, "AbstraktRenderer: released all GL resources")
     }
 
     private fun drawQuad() {
@@ -737,6 +799,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T,     GLES30.GL_CLAMP_TO_EDGE)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
             android.opengl.GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bmp, 0)
             bmp.recycle()
