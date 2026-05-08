@@ -7,6 +7,7 @@ import android.view.Surface
 import com.example.myfistapp.FrameShape
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioSnapshot
+import kotlinx.coroutines.flow.StateFlow
 
 class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
 
@@ -60,4 +61,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
     fun cycleShape()                             { renderer.cycleShape() }
     fun setZoomMultiplier(value: Float)          { queueEvent { renderer.zoomMultiplier = value } }
+    val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
 }

@@ -18,6 +18,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 private const val TAG = "AbstraktGL"
 
@@ -113,6 +116,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var lastTimeLogMs   = 0L
     @Volatile var dumpPainterStatsOnNextFrame = false
 
+    private val _currentShapeName = MutableStateFlow("Cylinder")
+    val currentShapeName: StateFlow<String> = _currentShapeName.asStateFlow()
+
     fun cycleShape() {
         currentShape = when (currentShape) {
             is CylinderShape    -> SphereShape()
@@ -121,6 +127,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             is TetrahedronShape -> CylinderShape()
             else                -> CylinderShape()
         }
+        _currentShapeName.value = currentShape.name
         Log.d(TAG, "cycleShape → ${currentShape.name}")
     }
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.

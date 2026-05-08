@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -461,6 +462,17 @@ private fun VisualizerScreen() {
         }
     }
 
+    // Shape name flash — shown for ~1.5s whenever the cycle button changes the shape.
+    val currentShapeName by glView.currentShapeName.collectAsStateWithLifecycle()
+    val flashAlpha = remember { Animatable(0f) }
+    var shapeFlashFirstEmission by remember { mutableStateOf(true) }
+    LaunchedEffect(currentShapeName) {
+        if (shapeFlashFirstEmission) { shapeFlashFirstEmission = false; return@LaunchedEffect }
+        flashAlpha.snapTo(1f)
+        delay(800L)
+        flashAlpha.animateTo(0f, animationSpec = tween(durationMillis = 700, easing = LinearEasing))
+    }
+
     // Carousel — rebuilt whenever the registry changes.
     val modes: List<Mode> = remember(registryVersion) {
         buildList {
@@ -819,6 +831,23 @@ private fun VisualizerScreen() {
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
                         modifier = Modifier.alpha(hintAlpha),
+                    )
+                }
+
+                // Shape name flash — appears on cycle, fades after ~1.5s.
+                if (flashAlpha.value > 0.001f) {
+                    Text(
+                        text = currentShapeName,
+                        style = MaterialTheme.typography.displayLarge,
+                        color = NeonCyan.copy(alpha = flashAlpha.value),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .background(
+                                color = Color.Black.copy(alpha = flashAlpha.value * 0.5f),
+                                shape = RoundedCornerShape(16.dp),
+                            )
+                            .padding(horizontal = 32.dp, vertical = 16.dp),
                     )
                 }
             }
