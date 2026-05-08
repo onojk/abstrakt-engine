@@ -927,7 +927,8 @@ private fun VisualizerScreen() {
         ModalBottomSheet(
             onDismissRequest = { kaleidoVm.closeSheet() },
             sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor   = Color(0xFF1A1A24),
+            containerColor   = Color(0xFF1A1A24).copy(alpha = 0.85f),
+            scrimColor       = Color.Black.copy(alpha = 0.2f),
         ) {
             KaleidoSettingsContent(
                 settings                     = kaleidoSettings,
@@ -1278,8 +1279,8 @@ private fun KaleidoSettingsContent(
         }
         Text(
             text  = when {
-                settings.zoomMultiplier < 0.95f -> "Zoomed in (less border)"
-                settings.zoomMultiplier > 1.05f -> "Zoomed out (more border)"
+                settings.zoomMultiplier > 1.05f -> "Zoomed in (less border)"
+                settings.zoomMultiplier < 0.95f -> "Zoomed out (more border)"
                 else                            -> "Default"
             },
             style    = MaterialTheme.typography.bodySmall,
