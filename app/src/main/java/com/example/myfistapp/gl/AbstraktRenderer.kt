@@ -115,9 +115,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
 
     fun cycleShape() {
         currentShape = when (currentShape) {
-            is CylinderShape -> SphereShape()
-            is SphereShape   -> CylinderShape()
-            else             -> CylinderShape()
+            is CylinderShape    -> SphereShape()
+            is SphereShape      -> CubeShape()
+            is CubeShape        -> TetrahedronShape()
+            is TetrahedronShape -> CylinderShape()
+            else                -> CylinderShape()
         }
         Log.d(TAG, "cycleShape → ${currentShape.name}")
     }
