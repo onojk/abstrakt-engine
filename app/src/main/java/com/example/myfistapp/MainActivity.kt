@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -264,6 +263,9 @@ private fun VisualizerScreen() {
     }
     LaunchedEffect(kaleidoSettings.zoomMultiplier) {
         glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
+    }
+    LaunchedEffect(kaleidoSettings.shapeKind) {
+        glView.setShapeKind(kaleidoSettings.shapeKind)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -628,24 +630,6 @@ private fun VisualizerScreen() {
                         )
                     }
                 }
-            }
-
-            // Shape cycle button (debug — replaced by proper picker in slice 8d)
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(NeonCyan.copy(alpha = 0.15f))
-                    .alpha(if (isRendererReady) 1f else 0.3f)
-                    .clickable(enabled = isRendererReady) { glView.cycleShape() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector        = Icons.Default.ViewInAr,
-                    contentDescription = "Cycle shape",
-                    tint               = NeonCyan,
-                    modifier           = Modifier.size(22.dp),
-                )
             }
 
             // ⚙ Settings button
@@ -1058,6 +1042,7 @@ private fun VisualizerScreen() {
         ) {
             KaleidoSettingsContent(
                 settings                     = kaleidoSettings,
+                onShapeKindChange            = { kaleidoVm.setShapeKind(it) },
                 onFoldCountChange            = { kaleidoVm.setFoldCount(it) },
                 onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
                 onFrameShapeChange           = { kaleidoVm.setFrameShape(it) },
@@ -1247,6 +1232,7 @@ private fun GlCanvas(
 @Composable
 private fun KaleidoSettingsContent(
     settings: KaleidoSettings,
+    onShapeKindChange: (ShapeKind) -> Unit,
     onFoldCountChange: (Int) -> Unit,
     onSquareRotationLockedChange: (Boolean) -> Unit,
     onFrameShapeChange: (FrameShape) -> Unit,
@@ -1265,6 +1251,24 @@ private fun KaleidoSettingsContent(
             style = MaterialTheme.typography.titleLarge,
             color = NeonCyan,
         )
+        Spacer(Modifier.height(16.dp))
+        Text("Shape", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Spacer(Modifier.height(8.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding        = PaddingValues(horizontal = 4.dp),
+        ) {
+            items(ShapeKind.entries.toList()) { kind ->
+                FilterChip(
+                    selected    = settings.shapeKind == kind,
+                    onClick     = { onShapeKindChange(kind) },
+                    label       = { Text(kind.name) },
+                    leadingIcon = if (settings.shapeKind == kind) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                )
+            }
+        }
         Spacer(Modifier.height(16.dp))
         Text(
             "Fold count: ${settings.foldCount}",

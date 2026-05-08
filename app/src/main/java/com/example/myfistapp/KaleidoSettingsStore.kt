@@ -22,6 +22,7 @@ object KaleidoKeys {
     val FRAME_SHAPE       = stringPreferencesKey("frame_shape")
     val FRAME_COLOR_ARGB  = longPreferencesKey("frame_color_argb")
     val ZOOM_MULTIPLIER   = floatPreferencesKey("zoom_multiplier")
+    val SHAPE_KIND        = stringPreferencesKey("shape_kind")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -35,6 +36,9 @@ class KaleidoSettingsStore(private val context: Context) {
                 ?: FrameShape.Circle,
             frameColorArgb       = prefs[KaleidoKeys.FRAME_COLOR_ARGB] ?: 0xFFFFFFFFL,
             zoomMultiplier       = (prefs[KaleidoKeys.ZOOM_MULTIPLIER] ?: 1.0f).coerceIn(0.5f, 1.5f),
+            shapeKind            = prefs[KaleidoKeys.SHAPE_KIND]
+                ?.let { runCatching { ShapeKind.valueOf(it) }.getOrNull() }
+                ?: ShapeKind.Cylinder,
         )
     }
 
@@ -65,6 +69,12 @@ class KaleidoSettingsStore(private val context: Context) {
     suspend fun setZoomMultiplier(value: Float) {
         context.kaleidoDataStore.edit { prefs ->
             prefs[KaleidoKeys.ZOOM_MULTIPLIER] = value.coerceIn(0.5f, 1.5f)
+        }
+    }
+
+    suspend fun setShapeKind(value: ShapeKind) {
+        context.kaleidoDataStore.edit { prefs ->
+            prefs[KaleidoKeys.SHAPE_KIND] = value.name
         }
     }
 }

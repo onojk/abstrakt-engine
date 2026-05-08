@@ -46,4 +46,8 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun resetZoomMultiplier() {
         viewModelScope.launch { store.setZoomMultiplier(1.0f) }
     }
+
+    fun setShapeKind(value: ShapeKind) {
+        viewModelScope.launch { store.setShapeKind(value) }
+    }
 }

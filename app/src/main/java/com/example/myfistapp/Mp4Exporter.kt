@@ -17,6 +17,7 @@ import com.example.myfistapp.audio.AudioSnapshot
 import com.example.myfistapp.audio.analyzeOffline
 import com.example.myfistapp.gl.AbstraktRenderer
 import com.example.myfistapp.gl.GlVizMode
+import com.example.myfistapp.gl.shapeFor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
@@ -45,6 +46,7 @@ class Mp4Exporter(
     private val kaleidoSquareRotationLocked: Boolean = false,
     private val kaleidoFrameShape: FrameShape = FrameShape.Circle,
     private val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
+    private val kaleidoShapeKind: ShapeKind = ShapeKind.Cylinder,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -171,6 +173,7 @@ class Mp4Exporter(
         renderer.squareRotationLocked    = kaleidoSquareRotationLocked
         renderer.frameShape              = kaleidoFrameShape
         renderer.frameColorArgb          = kaleidoFrameColorArgb
+        renderer.setShapeKind(kaleidoShapeKind)
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

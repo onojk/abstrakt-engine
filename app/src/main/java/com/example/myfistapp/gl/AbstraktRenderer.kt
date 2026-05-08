@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.example.myfistapp.FrameShape
 import com.example.myfistapp.Mode
+import com.example.myfistapp.ShapeKind
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.AudioSnapshot
 import java.nio.ByteBuffer
@@ -119,16 +120,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private val _currentShapeName = MutableStateFlow("Cylinder")
     val currentShapeName: StateFlow<String> = _currentShapeName.asStateFlow()
 
-    fun cycleShape() {
-        currentShape = when (currentShape) {
-            is CylinderShape    -> SphereShape()
-            is SphereShape      -> CubeShape()
-            is CubeShape        -> TetrahedronShape()
-            is TetrahedronShape -> CylinderShape()
-            else                -> CylinderShape()
-        }
+    fun setShapeKind(kind: ShapeKind) {
+        currentShape = shapeFor(kind)
         _currentShapeName.value = currentShape.name
-        Log.d(TAG, "cycleShape → ${currentShape.name}")
+        Log.d(TAG, "setShapeKind → ${currentShape.name}")
     }
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.
     @Volatile var currentMode: Mode = Mode.Cyclone

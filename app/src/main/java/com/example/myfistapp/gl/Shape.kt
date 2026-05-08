@@ -1,5 +1,7 @@
 package com.example.myfistapp.gl
 
+import com.example.myfistapp.ShapeKind
+
 /**
  * A 3D shape that gets the painter FBO mapped onto its surface,
  * spun on a "skewer" axis, then fed into the kaleido pass.
@@ -48,3 +50,10 @@ data class ShapeMesh(
     val uvs: FloatArray,        // N * 2 floats — u, v per vertex
     val indices: ShortArray,    // triangle indices for glDrawElements(GL_TRIANGLES)
 )
+
+fun shapeFor(kind: ShapeKind): Shape = when (kind) {
+    ShapeKind.Cylinder    -> CylinderShape()
+    ShapeKind.Sphere      -> SphereShape()
+    ShapeKind.Cube        -> CubeShape()
+    ShapeKind.Tetrahedron -> TetrahedronShape()
+}

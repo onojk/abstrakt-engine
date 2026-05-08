@@ -416,6 +416,7 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        SummaryRow("Shape", settings.shapeKind.name)
         SummaryRow("Fold count", "${settings.foldCount}$orientationSuffix")
         SummaryRow("Frame shape", settings.frameShape.name)
         Row(
@@ -462,6 +463,19 @@ private fun ExportKaleidoOverrideContent(
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        Text("Shape", color = Color.White, fontSize = 14.sp)
+        Spacer(Modifier.height(4.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(ShapeKind.entries.toList()) { kind ->
+                FilterChip(
+                    selected = settings.shapeKind == kind,
+                    onClick  = { onUpdate(settings.copy(shapeKind = kind)) },
+                    label    = { Text(kind.name) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
         Text("Fold count: ${settings.foldCount}", color = Color.White, fontSize = 14.sp)
         Slider(
             value         = settings.foldCount.toFloat(),

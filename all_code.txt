@@ -1,0 +1,3713 @@
+===== ./README.md =====
+# abstrakt-engine
+
+Native Android rendering engine for the Abstrakt audio-reactive visualizer family.
+Sister project to [onojk/abstrakt](https://github.com/onojk/abstrakt) (Python pipeline).
+
+> **Week 1, Day 1.** This is a learning project in active development — not a finished product.
+> The rendering engine and audio pipeline are planned; the first visualizer (`RippleField`) is running on a Pixel 8 emulator.
+
+---
+
+## What this is
+
+The Python `abstrakt` project generates audio-reactive music videos as offline renders on a desktop. This project brings the same visualizer aesthetic to Android as a real-time, interactive application.
+
+The goal is a native Android engine that:
+- reads audio from microphone or file in real time
+- runs FFT analysis per frame to extract bass, mid, treble, onset, and energy
+- feeds those values into Compose Canvas visualizers
+- applies kaleidoscope symmetry transforms on-device
+
+The first visualizer (`RippleField`) is tap-driven rather than audio-driven — it exists to prove the Canvas/Compose animation loop works before wiring in the audio pipeline.
+
+---
+
+## Current state (Week 1)
+
+**Working:**
+- Jetpack Compose project running on emulator (Pixel 8, API 35)
+- `RippleField` visualizer: tap anywhere → animated concentric rings, random hue per tap, slow hue-cycling background
+- Git initialized, first commit locked in
+
+**Not yet built:**
+- Audio pipeline (mic input, FFT analysis, beat detection)
+- Visualizer picker UI
+- Any audio-reactive visualizer
+- The engine abstraction layer
+
+---
+
+## Planned architecture
+
+```
+abstrakt-engine/
+├── engine/          # Rendering primitives: Canvas helpers, animation loop, frame timing
+├── visualizers/     # Individual visualizers (each a @Composable that takes AudioFeatures)
+│   └── RippleField  # Tap-driven prototype (currently in MainActivity.kt)
+├── audio/           # Mic input, WAV reader, FFT, onset detection, AudioFeatures data class
+└── ui/              # Compose shell: visualizer picker, settings, permission handling
+```
+
+`AudioFeatures` is the contract between the audio pipeline and the visualizers:
+
+```kotlin
+data class AudioFeatures(
+    val bass: Float,    // 0..1
+    val mid: Float,     // 0..1
+    val treble: Float,  // 0..1
+    val onset: Boolean,
+    val energy: Float,
+)
+```
+
+Each visualizer is a `@Composable` that accepts `AudioFeatures` and renders to `Canvas`. The engine handles timing; visualizers handle drawing.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|-------|--------|
+| Language | Kotlin |
+| UI | Jetpack Compose (Material 3) |
+| Build | Gradle Kotlin DSL |
+| Min SDK | API 24 (Android 7.0) |
+| Target SDK | API 36 |
+| IDE | Android Studio Panda 4 |
+| Emulator | Pixel 8, API 35, Google Play, x86_64 |
+
+---
+
+## Roadmap
+
+**Week 2:** Kotlin Koans — learn the language before touching Android code again.
+Sections: Introduction → Conventions → Collections → Properties → Builders.
+
+**Week 3-4:** Audio pipeline — mic input via `AudioRecord`, per-frame FFT (numpy-equivalent in Kotlin), `AudioFeatures` data class.
+
+**Week 5-6:** First audio-reactive visualizer — port `warpfield` or `kaleido_qbist` aesthetic to Compose Canvas.
+
+**Week 7+:** Visualizer picker, kaleidoscope symmetry pass, file input (WAV/MP3).
+
+**Standing rule:** every shipped Android visualizer must have a paired feature/UI. No visualizer ships without a way to trigger it from the UI.
+
+---
+
+## Local setup
+
+```bash
+# Clone
+git clone https://github.com/onojk/abstrakt-engine
+
+# Open in Android Studio: File → Open → abstrakt-engine/
+# (Local folder is MyFistApp; Android Studio project structure uses that name)
+
+# Run on emulator
+# Build → Run 'app' (or Shift+F10)
+```
+
+KVM acceleration required for the emulator:
+```bash
+sudo apt-get install qemu-kvm
+kvm-ok  # should print "KVM acceleration can be used"
+```
+
+---
+
+## Relationship to onojk/abstrakt
+
+| | [onojk/abstrakt](https://github.com/onojk/abstrakt) | abstrakt-engine |
+|---|---|---|
+| Platform | Linux desktop | Android |
+| Runtime | Python + pygame | Kotlin + Compose |
+| Audio | WAV file, offline | Mic + file, real-time |
+| Output | MP4 file | Live screen |
+| Kaleido | frei0r (ffmpeg) | Planned on-device |
+| Status | Production | Week 1 |
+
+===== ./app/build.gradle.kts =====
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
+
+android {
+    namespace = "com.example.myfistapp"
+    compileSdk {
+        version = release(36) {
+            minorApiLevel = 1
+        }
+    }
+
+    defaultConfig {
+        applicationId = "com.example.myfistapp"
+        minSdk = 33
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    testImplementation(libs.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.junit)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+}
+===== ./app/src/androidTest/java/com/example/myfistapp/ExampleInstrumentedTest.kt =====
+package com.example.myfistapp
+
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.ext.junit.runners.AndroidJUnit4
+
+import org.junit.Test
+import org.junit.runner.RunWith
+
+import org.junit.Assert.*
+
+/**
+ * Instrumented test, which will execute on an Android device.
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+@RunWith(AndroidJUnit4::class)
+class ExampleInstrumentedTest {
+    @Test
+    fun useAppContext() {
+        // Context of the app under test.
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        assertEquals("com.example.myfistapp", appContext.packageName)
+    }
+}
+===== ./app/src/main/AndroidManifest.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MyFistApp">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MyFistApp">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
+===== ./app/src/main/java/com/example/myfistapp/MainActivity.kt =====
+package com.example.myfistapp
+
+import android.media.MediaPlayer
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.loadAndAnalyze
+import com.example.myfistapp.gl.AbstraktGLSurfaceView
+import com.example.myfistapp.gl.GlVizMode
+import com.example.myfistapp.gl.Painter
+import com.example.myfistapp.ui.theme.MyFistAppTheme
+import com.example.myfistapp.visualizers.KaleidoscopeCanvas
+import com.example.myfistapp.visualizers.WarpfieldCanvas
+import com.example.myfistapp.visualizers.WaveformCanvas
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val BgColor   = Color(0xFF0A0A0F)
+private val NeonCyan  = Color(0xFF00FFFF)
+private val DimWhite  = Color(0x99FFFFFF)
+private val DimBg     = Color(0xFF1A1A2E)
+
+private enum class Viz(val label: String) {
+    WAVEFORM("Wave"),
+    WARPFIELD("Warp"),
+    KALEIDO("Echo"),
+    GL_WARP("Warp"),   // GL renderer — replaces Compose Warp as the primary warp toggle
+    GL_DRIFT("Drift"),
+    GL_CYCLONE("Cyclone"),
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            MyFistAppTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    VisualizerScreen()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisualizerScreen() {
+    val context = LocalContext.current
+    val scope   = rememberCoroutineScope()
+
+    var audioFile        by remember { mutableStateOf<AudioFile?>(null) }
+    var isLoading        by remember { mutableStateOf(false) }
+    var errorMsg         by remember { mutableStateOf<String?>(null) }
+    var isPlaying        by remember { mutableStateOf(false) }
+    var playbackFraction by remember { mutableStateOf(0f) }
+    var currentViz       by remember { mutableStateOf(Viz.WAVEFORM) }
+    var activePainter    by remember { mutableStateOf(Painter.HUE_STRIPE) }
+
+    val mediaPlayer = remember { MediaPlayer() }
+    DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
+
+    LaunchedEffect(audioFile?.uri) {
+        val af = audioFile ?: return@LaunchedEffect
+        isPlaying = false
+        playbackFraction = 0f
+        withContext(Dispatchers.IO) {
+            try {
+                mediaPlayer.reset()
+                mediaPlayer.setDataSource(context, af.uri)
+                mediaPlayer.prepare()
+            } catch (_: Exception) {}
+        }
+        mediaPlayer.setOnCompletionListener {
+            isPlaying = false
+            playbackFraction = 0f
+        }
+    }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            val dur = audioFile?.durationMs ?: 0L
+            if (dur > 0) playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
+            delay(16L)
+        }
+    }
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                isLoading = true
+                errorMsg = null
+                try {
+                    audioFile = loadAndAnalyze(context, uri)
+                } catch (e: Exception) {
+                    errorMsg = e.message ?: "Unknown error"
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgColor),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "abstrakt / ${currentViz.label.lowercase()}",
+                color = NeonCyan,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = { launcher.launch(arrayOf("audio/*")) },
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+            ) {
+                Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+
+            audioFile?.let { af ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "${af.durationMs / 1000}s · ${af.sampleRate} Hz · " +
+                        if (af.channelCount == 1) "mono" else "stereo",
+                    color = DimWhite,
+                    fontSize = 13.sp,
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Visualizer toggle — Wave | Warp(GL) | Echo | GL.  WARPFIELD is kept in the enum
+            // for Echo's internal WarpfieldCanvas layer but has no top-level button.
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                listOf(Viz.WAVEFORM, Viz.GL_WARP, Viz.KALEIDO, Viz.GL_DRIFT, Viz.GL_CYCLONE).forEach { viz ->
+                    val active = currentViz == viz
+                    Button(
+                        onClick = { currentViz = viz },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (active) NeonCyan else DimBg,
+                        ),
+                    ) {
+                        Text(
+                            text = viz.label,
+                            color = if (active) Color.Black else DimWhite,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+            }
+
+            if (currentViz == Viz.GL_CYCLONE) {
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Painter.entries.forEach { painter ->
+                        val active = activePainter == painter
+                        Button(
+                            onClick = { activePainter = painter },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (active) NeonCyan else DimBg,
+                            ),
+                        ) {
+                            Text(
+                                text = painter.label,
+                                color = if (active) Color.Black else DimWhite,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    isLoading -> CircularProgressIndicator(color = NeonCyan)
+                    errorMsg != null -> Text(
+                        text = "Error: $errorMsg",
+                        color = Color(0xFFFF4040),
+                        fontSize = 14.sp,
+                    )
+                    else -> when (currentViz) {
+                        Viz.WAVEFORM -> if (audioFile != null) {
+                            WaveformCanvas(
+                                audioFile = audioFile!!,
+                                playbackFraction = playbackFraction,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            Text("No file loaded", color = DimWhite, fontSize = 14.sp)
+                        }
+                        Viz.WARPFIELD -> WarpfieldCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.KALEIDO -> KaleidoscopeCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_WARP -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.WARP,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_DRIFT -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.DRIFT,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Viz.GL_CYCLONE -> GlCanvas(
+                            audioFile = audioFile,
+                            playbackFraction = playbackFraction,
+                            glMode = GlVizMode.CYCLONE,
+                            painter = activePainter,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            if (audioFile != null && !isLoading) {
+                Button(
+                    onClick = {
+                        if (isPlaying) {
+                            mediaPlayer.pause()
+                            isPlaying = false
+                        } else {
+                            try {
+                                mediaPlayer.start()
+                                isPlaying = true
+                            } catch (_: IllegalStateException) {}
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPlaying) Color(0xFFFF2D78) else NeonCyan,
+                    ),
+                ) {
+                    Text(
+                        text = if (isPlaying) "Pause" else "Play",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlCanvas(
+    audioFile: AudioFile?,
+    playbackFraction: Float,
+    glMode: GlVizMode,
+    painter: Painter = Painter.HUE_STRIPE,
+    modifier: Modifier = Modifier,
+) {
+    val context        = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Scoped to this composable's lifetime: torn down when user toggles away, fresh on toggle-back.
+    val glView = remember { AbstraktGLSurfaceView(context) }
+
+    DisposableEffect(lifecycleOwner) {
+        // Lifecycle is already RESUMED when this composable first enters composition;
+        // the observer won't fire ON_RESUME retroactively, so kick it manually.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            glView.onResume()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> glView.onResume()
+                Lifecycle.Event.ON_PAUSE  -> glView.onPause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            glView.onPause()   // stop GL thread when composable leaves composition
+        }
+    }
+
+    AndroidView(
+        factory = { glView },
+        update = { view ->
+            // Called on every recomposition — pushes latest audio + mode state to the GL thread.
+            view.setAudioFile(audioFile)
+            view.setPlaybackFraction(playbackFraction)
+            view.setGlMode(glMode)
+            view.setPainter(painter)
+        },
+        modifier = modifier,
+    )
+}
+
+===== ./app/src/main/java/com/example/myfistapp/audio/AudioAnalyzer.kt =====
+package com.example.myfistapp.audio
+
+// NOTE: "bands" here are time-windowed views of amplitude, not true frequency bands.
+// Real FFT analysis is deferred to a later slice. This is sufficient for slice 1
+// visual reactivity but won't distinguish bass from treble.
+
+import kotlin.math.abs
+
+data class AudioSnapshot(
+    val bands: FloatArray,  // 8 values in [0,1]; see NOTE above
+    val peak: Float,
+    val isBeat: Boolean,
+)
+
+fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
+    val env = audioFile.amplitudeEnvelope
+    if (env.isEmpty()) return AudioSnapshot(FloatArray(8), 0f, false)
+
+    val n = env.size
+    val center = (playbackFraction * n).toInt().coerceIn(0, n - 1)
+
+    fun avg(half: Int): Float {
+        val lo = (center - half).coerceAtLeast(0)
+        val hi = (center + half).coerceAtMost(n - 1)
+        var s = 0f
+        for (i in lo..hi) s += env[i]
+        return s / (hi - lo + 1)
+    }
+
+    val low  = avg(30)   // very slow — bass proxy
+    val mid  = avg(8)    // medium window
+    val fast = avg(2)    // short window
+
+    // high: derivative magnitude — rapid amplitude changes proxy treble/transients
+    val prev = (center - 3).coerceAtLeast(0)
+    val next = (center + 3).coerceAtMost(n - 1)
+    val high = abs(env[next] - env[prev]).coerceAtMost(1f)
+
+    val slowAvg = avg(60)
+    val isBeat  = env[center] > slowAvg * 1.4f && env[center] > 0.25f
+
+    val bands = FloatArray(8) { i ->
+        when (i) {
+            0, 1 -> low
+            2, 3 -> mid
+            4, 5 -> (fast + high * 0.5f).coerceAtMost(1f)
+            6, 7 -> high
+            else -> 0f
+        }
+    }
+
+    return AudioSnapshot(bands = bands, peak = env[center], isBeat = isBeat)
+}
+
+===== ./app/src/main/java/com/example/myfistapp/audio/AudioFile.kt =====
+package com.example.myfistapp.audio
+
+import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
+
+data class AudioFile(
+    val uri: Uri,
+    val durationMs: Long,
+    val sampleRate: Int,
+    val channelCount: Int,
+    val amplitudeEnvelope: FloatArray,
+)
+
+suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(Dispatchers.IO) {
+    val extractor = MediaExtractor()
+    extractor.setDataSource(context, uri, null)
+
+    val trackIndex = (0 until extractor.trackCount).firstOrNull { i ->
+        extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+    } ?: error("No audio track found in file")
+
+    extractor.selectTrack(trackIndex)
+    val format = extractor.getTrackFormat(trackIndex)
+
+    val mime = format.getString(MediaFormat.KEY_MIME)!!
+    val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE))
+        format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
+    val channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
+        format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
+    val durationMs = if (format.containsKey(MediaFormat.KEY_DURATION))
+        format.getLong(MediaFormat.KEY_DURATION) / 1000L else 0L
+
+    val codec = MediaCodec.createDecoderByType(mime)
+    codec.configure(format, null, null, 0)
+    codec.start()
+
+    // ~50 ms window: (sampleRate * 0.05) samples per channel × channels × 2 bytes (PCM16 LE)
+    val windowSamples = ((sampleRate * 0.05).toInt() * channelCount).coerceAtLeast(1)
+    val windowBytes = windowSamples * 2
+
+    val envelope = mutableListOf<Float>()
+    val windowBuf = ByteArray(windowBytes)
+    var windowPos = 0
+
+    val bufInfo = MediaCodec.BufferInfo()
+    var inputDone = false
+    var outputDone = false
+
+    while (!outputDone) {
+        if (!inputDone) {
+            val idx = codec.dequeueInputBuffer(10_000L)
+            if (idx >= 0) {
+                val buf = codec.getInputBuffer(idx)!!
+                val n = extractor.readSampleData(buf, 0)
+                if (n < 0) {
+                    codec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    inputDone = true
+                } else {
+                    codec.queueInputBuffer(idx, 0, n, extractor.sampleTime, 0)
+                    extractor.advance()
+                }
+            }
+        }
+
+        when (val outIdx = codec.dequeueOutputBuffer(bufInfo, 10_000L)) {
+            MediaCodec.INFO_OUTPUT_FORMAT_CHANGED, MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
+            else -> if (outIdx >= 0) {
+                val outBuf = codec.getOutputBuffer(outIdx)!!
+                val pcm = ByteArray(bufInfo.size)
+                outBuf.get(pcm)
+                codec.releaseOutputBuffer(outIdx, false)
+
+                var offset = 0
+                while (offset < pcm.size) {
+                    val toCopy = minOf(pcm.size - offset, windowBytes - windowPos)
+                    System.arraycopy(pcm, offset, windowBuf, windowPos, toCopy)
+                    windowPos += toCopy
+                    offset += toCopy
+                    if (windowPos >= windowBytes) {
+                        // RMS over window: PCM16-LE, interleaved channels
+                        var sumSq = 0.0
+                        repeat(windowSamples) { i ->
+                            val lo = windowBuf[i * 2].toInt() and 0xFF
+                            val hi = windowBuf[i * 2 + 1].toInt() // sign-extends
+                            val s = (hi shl 8) or lo
+                            sumSq += s.toDouble() * s
+                        }
+                        envelope.add(sqrt(sumSq / windowSamples).toFloat())
+                        windowPos = 0
+                    }
+                }
+
+                if (bufInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    outputDone = true
+                }
+            }
+        }
+    }
+
+    codec.stop()
+    codec.release()
+    extractor.release()
+
+    val maxVal = envelope.maxOrNull() ?: 1f
+    val normalized = if (maxVal > 0f)
+        FloatArray(envelope.size) { envelope[it] / maxVal }
+    else
+        FloatArray(envelope.size)
+
+    AudioFile(uri, durationMs, sampleRate, channelCount, normalized)
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/AbstraktGLSurfaceView.kt =====
+package com.example.myfistapp.gl
+
+import android.content.Context
+import android.opengl.GLSurfaceView
+import com.example.myfistapp.audio.AudioFile
+
+class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
+
+    private val renderer = AbstraktRenderer(context)
+
+    init {
+        setEGLContextClientVersion(3)
+        setEGLConfigChooser(8, 8, 8, 8, 16, 0) // 16-bit depth buffer for 3D modes
+        setRenderer(renderer)
+        renderMode = RENDERMODE_CONTINUOUSLY
+    }
+
+    fun setAudioFile(file: AudioFile?)       = renderer.setAudioFile(file)
+    fun setPlaybackFraction(fraction: Float) = renderer.setPlaybackFraction(fraction)
+    fun setGlMode(mode: GlVizMode)           { renderer.glMode = mode }
+    fun setPainter(painter: Painter)         { renderer.audioUniforms.activePainter = painter }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/AbstraktRenderer.kt =====
+package com.example.myfistapp.gl
+
+import android.content.Context
+import android.graphics.BitmapFactory
+import android.opengl.GLES30
+import android.opengl.GLSurfaceView
+import android.opengl.GLUtils
+import android.opengl.Matrix
+import android.util.Log
+import com.example.myfistapp.audio.AudioFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
+
+private const val TAG = "AbstraktGL"
+
+private val QUAD_VERTS = floatArrayOf(
+    -1f, -1f,
+     1f, -1f,
+    -1f,  1f,
+     1f,  1f,
+)
+
+private const val WARP_GRID_DIM      = 70f
+private const val WARP_DOT_RADIUS    =  6f
+private const val PAINTER_TEX_W      = 1024
+private const val PAINTER_TEX_H      = 256
+private const val PAINTER_STRIPE_W   = 16
+
+internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Renderer {
+
+    val audioUniforms = AudioUniforms()
+    private val influencers = Influencers(audioUniforms)
+    private val driftState  = DriftState()
+
+    @Volatile var glMode: GlVizMode = GlVizMode.TEST
+
+    fun setAudioFile(file: AudioFile?)  { audioUniforms.audioFile        = file }
+    fun setPlaybackFraction(f: Float)   { audioUniforms.playbackFraction = f    }
+
+    private var testProgram:    ShaderProgram? = null
+    private var warpProgram:    ShaderProgram? = null
+    private var driftProgram:   ShaderProgram? = null
+    private var cycloneProgram: ShaderProgram? = null
+    private var kaleidoProgram: ShaderProgram? = null
+    private val painterPrograms: MutableMap<Painter, ShaderProgram> = mutableMapOf()
+    private var vaoId              = 0
+    private var vboId              = 0
+    private var cycloneVaoId       = 0
+    private var cycloneVboId       = 0
+    private var cycloneAngleRad    = 0f
+    private var kaleidoRotationRad = 0f
+    private val cylinderVertexCount = CylinderGeometry.VERTEX_COUNT
+    private var painterFBO      = 0
+    private var painterTexture  = 0
+    private var imageTexture    = 0
+    private var imageWidth      = 0
+    private var imageHeight     = 0
+    private var beatDecay       = 0f
+    // FBO fields kept for createFBO/destroyFBO helpers — not used by Drift's polar branch.
+    private var fboId        = 0
+    private var fboTexId     = 0
+    private var surfaceWidth  = 1
+    private var surfaceHeight = 1
+    private var startTimeNs   = 0L
+    private var lastFrameNs   = 0L
+
+    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        Log.d(TAG, "onSurfaceCreated — building GL resources")
+        testProgram        = null
+        warpProgram        = null
+        driftProgram       = null
+        cycloneProgram     = null
+        kaleidoProgram     = null
+        painterPrograms.clear()
+        vaoId              = 0
+        vboId              = 0
+        cycloneVaoId       = 0
+        cycloneVboId       = 0
+        cycloneAngleRad    = 0f
+        kaleidoRotationRad = 0f
+        painterFBO      = 0
+        painterTexture  = 0
+        imageTexture    = 0
+        imageWidth      = 0
+        imageHeight     = 0
+        fboId           = 0
+        fboTexId        = 0
+        startTimeNs     = 0L
+        lastFrameNs     = 0L
+        audioUniforms.uniformsLogged = false
+
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+
+        testProgram    = ShaderProgram(Shaders.TEST_VERT,    Shaders.TEST_FRAG)
+        warpProgram    = ShaderProgram(Shaders.WARP_VERT,    Shaders.WARP_FRAG)
+        driftProgram   = ShaderProgram(Shaders.TEST_VERT,    Shaders.DRIFT_POLAR_FRAG)
+        cycloneProgram = ShaderProgram(Shaders.CYCLONE_VERT, Shaders.CYCLONE_FRAG)
+        kaleidoProgram = ShaderProgram(Shaders.TEST_VERT,    Shaders.CYCLONE_KALEIDO_FRAG)
+        allPainters().forEach { entry ->
+            painterPrograms[entry.painter] = ShaderProgram(entry.vert, entry.frag)
+        }
+
+        // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
+        val vaos = IntArray(1)
+        GLES30.glGenVertexArrays(1, vaos, 0)
+        vaoId = vaos[0]
+        GLES30.glBindVertexArray(vaoId)
+
+        val vbos = IntArray(1)
+        GLES30.glGenBuffers(1, vbos, 0)
+        vboId = vbos[0]
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vboId)
+
+        val buf = ByteBuffer
+            .allocateDirect(QUAD_VERTS.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        buf.put(QUAD_VERTS)
+        buf.position(0)
+        GLES30.glBufferData(
+            GLES30.GL_ARRAY_BUFFER,
+            QUAD_VERTS.size * Float.SIZE_BYTES,
+            buf,
+            GLES30.GL_STATIC_DRAW,
+        )
+
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
+
+        GLES30.glBindVertexArray(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+
+        // ── Cylinder VAO/VBO (Cyclone mode) ──────────────────────────────────
+        val cycVaos = IntArray(1)
+        GLES30.glGenVertexArrays(1, cycVaos, 0)
+        cycloneVaoId = cycVaos[0]
+        GLES30.glBindVertexArray(cycloneVaoId)
+
+        val cycVbos = IntArray(1)
+        GLES30.glGenBuffers(1, cycVbos, 0)
+        cycloneVboId = cycVbos[0]
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, cycloneVboId)
+
+        val cylData = CylinderGeometry.vertices
+        val cylBuf  = ByteBuffer
+            .allocateDirect(cylData.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        cylBuf.put(cylData).position(0)
+        GLES30.glBufferData(
+            GLES30.GL_ARRAY_BUFFER,
+            cylData.size * Float.SIZE_BYTES,
+            cylBuf,
+            GLES30.GL_STATIC_DRAW,
+        )
+
+        val stride = CylinderGeometry.STRIDE_BYTES
+        // a_position: location 0, vec3, offset 0
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride, 0)
+        // a_uv: location 1, vec2, offset 12 bytes (3 floats)
+        GLES30.glEnableVertexAttribArray(1)
+        GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, stride, 12)
+
+        GLES30.glBindVertexArray(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+
+        // ── Painter texture + FBO (Cyclone rolling paint) ────────────────────
+        val pTexIds = IntArray(1)
+        GLES30.glGenTextures(1, pTexIds, 0)
+        painterTexture = pTexIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA,
+            PAINTER_TEX_W, PAINTER_TEX_H, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null,
+        )
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        // GL_REPEAT in S lets the cylinder UV wrap cleanly at the seam.
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_REPEAT)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+        val pFboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, pFboIds, 0)
+        painterFBO = pFboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, painterTexture, 0,
+        )
+        val painterStatus = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+        Log.d(TAG, "painterFBO ${PAINTER_TEX_W}x${PAINTER_TEX_H}: ${
+            if (painterStatus == GLES30.GL_FRAMEBUFFER_COMPLETE) "COMPLETE"
+            else "ERROR 0x${painterStatus.toString(16)}"
+        }")
+        // One-time clear to black — thereafter only scissored stripe writes touch it.
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+        // ── Image texture (Cyclone IMAGE painter) ───────────────────────────
+        try {
+            val opts = BitmapFactory.Options().also { it.inScaled = false }
+            val bmp  = context.assets.open("cyclone_image.jpg")
+                .use { BitmapFactory.decodeStream(it, null, opts) }
+            if (bmp != null) {
+                val iTexIds = IntArray(1)
+                GLES30.glGenTextures(1, iTexIds, 0)
+                imageTexture = iTexIds[0]
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S,     GLES30.GL_REPEAT)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T,     GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bmp, 0)
+                imageWidth  = bmp.width
+                imageHeight = bmp.height
+                bmp.recycle()
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                Log.d(TAG, "imageTexture loaded: ${imageWidth}x${imageHeight} id=$imageTexture")
+            } else {
+                Log.w(TAG, "cyclone_image.jpg decode returned null")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "cyclone_image.jpg load failed: ${e.message}")
+        }
+
+        Log.d(TAG, "GL resources ready: quad vao=$vaoId cyclone vao=$cycloneVaoId " +
+            "test=${testProgram?.id} warp=${warpProgram?.id} " +
+            "drift=${driftProgram?.id} cyclone=${cycloneProgram?.id} " +
+            "painters=${painterPrograms.mapValues { it.value.id }}")
+    }
+
+    override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
+        surfaceWidth  = w
+        surfaceHeight = h
+        GLES30.glViewport(0, 0, w, h)
+        Log.d(TAG, "onSurfaceChanged: ${w}x${h}")
+    }
+
+    // ── FBO helpers — available for future two-pass visualizers. ──────────────
+    // Call createFBO from onSurfaceChanged and destroyFBO from onSurfaceCreated
+    // (context loss) when a mode that needs them is active.
+
+    private fun destroyFBO() {
+        if (fboTexId != 0) { GLES30.glDeleteTextures(1, intArrayOf(fboTexId), 0); fboTexId = 0 }
+        if (fboId    != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(fboId), 0); fboId = 0 }
+    }
+
+    @Suppress("unused")
+    private fun createFBO(w: Int, h: Int) {
+        destroyFBO()
+
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        fboTexId = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, fboTexId)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null,
+        )
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        fboId = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fboId)
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, fboTexId, 0,
+        )
+        val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+        Log.d(TAG, "FBO ${w}x${h}: ${
+            if (status == GLES30.GL_FRAMEBUFFER_COMPLETE) "COMPLETE"
+            else "ERROR 0x${status.toString(16)}"
+        }")
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+    }
+
+    override fun onDrawFrame(gl: GL10?) {
+        val nowNs = System.nanoTime()
+        if (startTimeNs == 0L) { startTimeNs = nowNs; lastFrameNs = nowNs }
+        val timeSec = (nowNs - startTimeNs) / 1_000_000_000f
+        val dt      = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceAtMost(0.1f)
+        lastFrameNs = nowNs
+
+        val wW = surfaceWidth.toFloat()
+        val wH = surfaceHeight.toFloat()
+
+        when (glMode) {
+            GlVizMode.TEST -> {
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                val prog = testProgram ?: return
+                prog.use()
+                prog.setVec2("u_resolution", wW, wH)
+                audioUniforms.applyToProgram(prog, timeSec)
+                drawQuad()
+            }
+
+            GlVizMode.WARP -> {
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                val prog = warpProgram ?: return
+                prog.use()
+                prog.setVec2("u_resolution", wW, wH)
+                prog.setFloat("u_grid_dim",   WARP_GRID_DIM)
+                prog.setFloat("u_dot_radius", WARP_DOT_RADIUS)
+                audioUniforms.applyToProgram(prog, timeSec)
+                influencers.updateForFrame(timeSec, dt, wW, wH)
+                influencers.applyToProgram(prog)
+                drawQuad()
+            }
+
+            GlVizMode.DRIFT -> {
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                val prog = driftProgram ?: return
+                val snap = audioUniforms.getSnapshot()
+                // Spike beatDecay to 1.0 on beat, then decay with τ ≈ 200ms.
+                beatDecay = if (snap.isBeat) 1.0f
+                            else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
+                                .coerceAtLeast(0f)
+                driftState.update(timeSec, snap.bands)
+                prog.use()
+                audioUniforms.applyToProgram(prog, timeSec)
+                driftState.applyToProgram(prog)
+                prog.setFloat("u_beat_decay", beatDecay)
+                drawQuad()
+            }
+
+            GlVizMode.CYCLONE -> {
+                val snap  = audioUniforms.getSnapshot()
+                beatDecay = if (snap.isBeat) 1.0f
+                            else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
+                                .coerceAtLeast(0f)
+
+                val cProg = cycloneProgram ?: return
+                val pProg = painterPrograms[audioUniforms.activePainter] ?: return
+
+                // Advance rotation: 2π radians per 30 seconds.
+                cycloneAngleRad += dt * (2f * Math.PI.toFloat() / 30f)
+
+                // ── Pass 1: Painter — write a hue stripe at the rear angle ───
+                // Rear is 270° past front (front = α+π/2, rear = α+3π/2).
+                val rearU = ((cycloneAngleRad + 3.0 * Math.PI / 2.0)
+                    .mod(2.0 * Math.PI) / (2.0 * Math.PI)).toFloat()
+                val rearX = (rearU * PAINTER_TEX_W).toInt().coerceIn(0, PAINTER_TEX_W - 1)
+                val endX  = rearX + PAINTER_STRIPE_W
+
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
+                GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
+                GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+                // Blend enabled so painters that output alpha<1 (e.g. PrintHead v2 transparent
+                // gaps) leave existing FBO content intact rather than overwriting with black.
+                // Opaque painters (HueStripe, AudioPaint, alpha=1) are unaffected.
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                pProg.use()
+                // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
+                pProg.setFloat("u_time", timeSec)
+                pProg.setFloat("u_peak", snap.peak)
+                pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
+                pProg.setFloat("u_beat_decay", beatDecay)
+                pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
+                pProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+                pProg.setFloatArray("u_bands", snap.bands)
+                // IMAGE painter: bind source image to unit 1.
+                if (audioUniforms.activePainter == Painter.IMAGE && imageTexture != 0) {
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+                    pProg.setInt("u_image", 1)
+                    pProg.setFloat("u_image_width", imageWidth.toFloat())
+                }
+                if (endX <= PAINTER_TEX_W) {
+                    GLES30.glScissor(rearX, 0, PAINTER_STRIPE_W, PAINTER_TEX_H)
+                    drawQuad()
+                } else {
+                    // Stripe wraps past the right edge — two scissored draws.
+                    GLES30.glScissor(rearX, 0, PAINTER_TEX_W - rearX, PAINTER_TEX_H)
+                    drawQuad()
+                    GLES30.glScissor(0, 0, endX - PAINTER_TEX_W, PAINTER_TEX_H)
+                    drawQuad()
+                }
+                if (audioUniforms.activePainter == Painter.IMAGE) {
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                }
+                GLES30.glDisable(GLES30.GL_BLEND)
+                GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+                // ── Pass 2: Cylinder — sample painter texture, draw 3D mesh ──
+                GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                GLES30.glClearColor(0.12f, 0.12f, 0.12f, 1f)
+                GLES30.glEnable(GLES30.GL_DEPTH_TEST)
+                GLES30.glEnable(GLES30.GL_CULL_FACE)
+                GLES30.glCullFace(GLES30.GL_BACK)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
+
+                val modelM = FloatArray(16)
+                val viewM  = FloatArray(16)
+                val projM  = FloatArray(16)
+                val vpM    = FloatArray(16)
+                val mvpM   = FloatArray(16)
+
+                Matrix.setIdentityM(modelM, 0)
+                val shakeY = (beatDecay * 0.35f * Math.sin(timeSec * 45.0)).toFloat()
+                Matrix.translateM(modelM, 0, 0f, shakeY, 0f)
+                Matrix.rotateM(modelM, 0,
+                    Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
+                Matrix.setLookAtM(viewM, 0,
+                    0f, 0f, 3f, 0f, 0f, 0f, 0f, 1f, 0f)
+                Matrix.perspectiveM(projM, 0, 45f, wW / wH, 0.1f, 100f)
+                Matrix.multiplyMM(vpM,  0, projM, 0, viewM,  0)
+                Matrix.multiplyMM(mvpM, 0, vpM,   0, modelM, 0)
+
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+
+                cProg.use()
+                cProg.setMat4("u_mvp", mvpM)
+                cProg.setInt("u_painterTexture", 0)
+
+                GLES30.glBindVertexArray(cycloneVaoId)
+                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, cylinderVertexCount)
+                GLES30.glBindVertexArray(0)
+
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+                // Depth + cull off — kaleido is a fullscreen quad, ignores depth.
+                GLES30.glDisable(GLES30.GL_DEPTH_TEST)
+                GLES30.glDisable(GLES30.GL_CULL_FACE)
+
+                // ── Pass 3: Kaleido overlay — alpha-blended mandala over cylinder ──
+                val kProg = kaleidoProgram
+                if (kProg != null) {
+                    kaleidoRotationRad += dt * 0.05f
+                    GLES30.glEnable(GLES30.GL_BLEND)
+                    GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+                    kProg.use()
+                    kProg.setInt("u_content", 0)
+                    kProg.setVec2("u_resolution", wW, wH)
+                    kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
+                    kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+                    drawQuad()
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glDisable(GLES30.GL_BLEND)
+                }
+
+                GLES30.glClearColor(0f, 0f, 0f, 1f)
+            }
+        }
+    }
+
+    private fun drawQuad() {
+        GLES30.glBindVertexArray(vaoId)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        GLES30.glBindVertexArray(0)
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/AudioUniforms.kt =====
+package com.example.myfistapp.gl
+
+import android.opengl.GLES30
+import android.util.Log
+import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.AudioSnapshot
+import com.example.myfistapp.audio.snapshotAt
+
+private const val TAG = "AbstraktGL"
+
+private val UNIFORM_NAMES = listOf(
+    "u_time", "u_resolution", "u_peak", "u_beat", "u_bands", "u_playback_fraction",
+)
+
+internal class AudioUniforms {
+
+    // Written on main thread, read on GL thread — @Volatile ensures visibility.
+    @Volatile var audioFile: AudioFile? = null
+    @Volatile var playbackFraction: Float = 0f
+    @Volatile var activePainter: Painter = Painter.HUE_STRIPE
+
+    // Reset to false in onSurfaceCreated so locations are re-logged after context restore.
+    internal var uniformsLogged = false
+
+    fun getSnapshot(): AudioSnapshot =
+        audioFile?.let { snapshotAt(it, playbackFraction) }
+            ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+    fun applyToProgram(program: ShaderProgram, timeSec: Float) {
+        val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
+            ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+        if (!uniformsLogged) {
+            UNIFORM_NAMES.forEach { name ->
+                val loc = GLES30.glGetUniformLocation(program.id, name)
+                Log.d(TAG, "uniform '$name' → location $loc${if (loc == -1) " (optimized out)" else ""}")
+            }
+            uniformsLogged = true
+        }
+
+        program.setFloat("u_time", timeSec)
+        program.setFloat("u_peak", snap.peak)
+        program.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
+        program.setFloat("u_playback_fraction", playbackFraction)
+        program.setFloatArray("u_bands", snap.bands)
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/CylinderGeometry.kt =====
+package com.example.myfistapp.gl
+
+import kotlin.math.cos
+import kotlin.math.sin
+
+internal object CylinderGeometry {
+
+    const val ANGULAR_SEGMENTS = 64
+    const val RADIUS            = 0.5f
+    const val HALF_HEIGHT       = 1.0f  // y from -1.0 to +1.0
+
+    // Interleaved layout per vertex: [x, y, z, u, v]
+    const val FLOATS_PER_VERTEX = 5
+    const val STRIDE_BYTES      = FLOATS_PER_VERTEX * Float.SIZE_BYTES  // 20
+
+    // Strip: for each of the (N+1) columns, emit bottom then top.
+    // Total = 2 * (ANGULAR_SEGMENTS + 1) = 130 vertices.
+    val VERTEX_COUNT = 2 * (ANGULAR_SEGMENTS + 1)
+
+    val vertices: FloatArray = buildVertices()
+
+    private fun buildVertices(): FloatArray {
+        val data = FloatArray(VERTEX_COUNT * FLOATS_PER_VERTEX)
+        var idx  = 0
+        for (i in 0..ANGULAR_SEGMENTS) {
+            val u     = i.toFloat() / ANGULAR_SEGMENTS
+            val angle = u * 2.0 * Math.PI
+            val x     = (cos(angle) * RADIUS).toFloat()
+            val z     = (sin(angle) * RADIUS).toFloat()
+
+            // Bottom vertex (v = 0.0)
+            data[idx++] = x;  data[idx++] = -HALF_HEIGHT;  data[idx++] = z
+            data[idx++] = u;  data[idx++] = 0.0f
+
+            // Top vertex (v = 1.0)
+            data[idx++] = x;  data[idx++] = HALF_HEIGHT;  data[idx++] = z
+            data[idx++] = u;  data[idx++] = 1.0f
+        }
+        return data
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/DriftState.kt =====
+package com.example.myfistapp.gl
+
+import java.util.Random
+
+private const val NUM_BARS   = 32
+private const val NUM_BANDS  = 8
+private const val NUM_LAYERS = 4
+private const val RING_SIZE  = 16   // covers max access: LAG[3](6) + ghost_age(5) = tick 11
+private const val RING_TICKS = 12   // how many ticks we export to the shader
+private const val HIST_UPDATE_SECS = 0.08f
+
+// Layer read offsets in ring-buffer ticks (1 tick ≈ 80ms).
+private val LAG_TICKS = intArrayOf(0, 1, 3, 6)
+
+// Seeds for 4 independent Fisher-Yates shuffles — different columns light up per layer.
+private val SCRAMBLE_SEEDS = longArrayOf(42L, 137L, 293L, 511L)
+
+internal class DriftState {
+
+    // 4 scrambles packed as float[128]: scrambleF[layer*32 + col] = band index (0..7).
+    val scrambleF: FloatArray = run {
+        val combined = FloatArray(NUM_LAYERS * NUM_BARS)
+        for (l in 0 until NUM_LAYERS) {
+            val arr = IntArray(NUM_BARS) { it % NUM_BANDS }
+            val rng = Random(SCRAMBLE_SEEDS[l])
+            for (i in NUM_BARS - 1 downTo 1) {
+                val j = rng.nextInt(i + 1)
+                val tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp
+            }
+            for (col in 0 until NUM_BARS) combined[l * NUM_BARS + col] = arr[col].toFloat()
+        }
+        combined
+    }
+
+    // Ring buffer: bandRing[tick * NUM_BANDS + band], wraps at RING_SIZE.
+    private val bandRing = FloatArray(RING_SIZE * NUM_BANDS)
+    private var writeHead = 0
+    private var lastUpdateTimeSec = 0f
+
+    // Pre-linearized export: slot 0 = newest tick, slot 11 = 11 ticks ago.
+    // Passed as u_band_ring[96] to the shader.
+    private val bandRingExport = FloatArray(RING_TICKS * NUM_BANDS)
+
+    fun update(timeSec: Float, bands: FloatArray) {
+        if (timeSec - lastUpdateTimeSec < HIST_UPDATE_SECS) return
+        lastUpdateTimeSec = timeSec
+
+        // Advance write head and record current bands.
+        writeHead = (writeHead + 1) % RING_SIZE
+        for (b in 0 until NUM_BANDS) bandRing[writeHead * NUM_BANDS + b] = bands[b]
+
+        // Export RING_TICKS slots newest-first so the shader can index with
+        // u_band_ring[(lag + ghostAge) * NUM_BANDS + bandIdx].
+        for (t in 0 until RING_TICKS) {
+            val src = ((writeHead - t) + RING_SIZE * 2) % RING_SIZE
+            for (b in 0 until NUM_BANDS) {
+                bandRingExport[t * NUM_BANDS + b] = bandRing[src * NUM_BANDS + b]
+            }
+        }
+    }
+
+    fun applyToProgram(program: ShaderProgram) {
+        program.setFloatArray("u_band_ring", bandRingExport)
+        program.setFloatArray("u_scramble",  scrambleF)
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/GlVizMode.kt =====
+package com.example.myfistapp.gl
+
+enum class GlVizMode { TEST, WARP, DRIFT, CYCLONE }
+
+===== ./app/src/main/java/com/example/myfistapp/gl/Influencers.kt =====
+package com.example.myfistapp.gl
+
+import android.opengl.GLES30
+import android.util.Log
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+
+private const val TAG = "AbstraktGL"
+
+private const val INF_COUNT = 5
+
+// Orbit parameters matching WarpfieldView.kt exactly.
+private val INF_ORBIT = floatArrayOf(0.20f, 0.26f, 0.17f, 0.23f, 0.21f)
+private val INF_SPEED = floatArrayOf(0.10f, 0.07f, 0.13f, 0.06f, 0.11f)
+private val INF_PHASE = floatArrayOf(0f, 1.257f, 2.513f, 3.770f, 5.026f)
+
+internal class Influencers(private val audioUniforms: AudioUniforms) {
+
+    // posXY: interleaved (x0,y0, x1,y1, …) — handed directly to glUniform2fv.
+    private val posXY    = FloatArray(INF_COUNT * 2)
+    private val strength = FloatArray(INF_COUNT)
+    private var infRadius = 180f
+    private var beatFlash = 0f
+
+    fun updateForFrame(timeSec: Float, dt: Float, resW: Float, resH: Float) {
+        val snap = audioUniforms.getSnapshot()
+
+        if (snap.isBeat) beatFlash = 1f
+        beatFlash = (beatFlash - dt * 3f).coerceAtLeast(0f)
+
+        val minDim = min(resW, resH)
+        infRadius = (0.18f + snap.bands[1] * 0.07f) * minDim
+        val baseStrength = 45f + snap.bands[0] * 85f + beatFlash * 65f
+
+        for (k in 0 until INF_COUNT) {
+            posXY[k * 2]     = resW / 2f + cos(timeSec * INF_SPEED[k] + INF_PHASE[k]) * resW * INF_ORBIT[k]
+            posXY[k * 2 + 1] = resH / 2f + sin(timeSec * INF_SPEED[k] + INF_PHASE[k]) * resH * INF_ORBIT[k]
+            strength[k] = baseStrength
+        }
+    }
+
+    private var locationsLogged = false
+
+    fun applyToProgram(program: ShaderProgram) {
+        if (!locationsLogged) {
+            listOf("u_influencer_pos", "u_influencer_strength", "u_inf_radius",
+                   "u_grid_dim", "u_dot_radius").forEach { name ->
+                val loc = GLES30.glGetUniformLocation(program.id, name)
+                Log.d(TAG, "warp uniform '$name' → location $loc${if (loc == -1) " (optimized out)" else ""}")
+            }
+            locationsLogged = true
+        }
+        program.setVec2Array("u_influencer_pos", posXY)
+        program.setFloatArray("u_influencer_strength", strength)
+        program.setFloat("u_inf_radius", infRadius)
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/Painter.kt =====
+package com.example.myfistapp.gl
+
+enum class Painter(val label: String) {
+    HUE_STRIPE("Hue"),
+    AUDIO_PAINT("Audio"),
+    PRINT_HEAD("Print"),
+    IMAGE("Image"),
+}
+
+internal data class PainterEntry(
+    val painter: Painter,
+    val vert: String,
+    val frag: String,
+)
+
+internal fun allPainters(): List<PainterEntry> = listOf(
+    PainterEntry(Painter.HUE_STRIPE,  Shaders.PAINTER_VERT, Shaders.PAINTER_HUESTRIPE_FRAG),
+    PainterEntry(Painter.AUDIO_PAINT, Shaders.PAINTER_VERT, Shaders.PAINTER_AUDIOPAINT_FRAG),
+    PainterEntry(Painter.PRINT_HEAD,  Shaders.PAINTER_VERT, Shaders.PAINTER_PRINTHEAD_FRAG),
+    PainterEntry(Painter.IMAGE,       Shaders.PAINTER_VERT, Shaders.PAINTER_IMAGE_FRAG),
+)
+
+===== ./app/src/main/java/com/example/myfistapp/gl/ShaderProgram.kt =====
+package com.example.myfistapp.gl
+
+import android.opengl.GLES30
+import android.util.Log
+
+private const val TAG = "AbstraktGL"
+
+internal class ShaderProgram(vertSrc: String, fragSrc: String) {
+
+    val id: Int = run {
+        val vert = compileShader(GLES30.GL_VERTEX_SHADER, vertSrc)
+        val frag = compileShader(GLES30.GL_FRAGMENT_SHADER, fragSrc)
+        val prog = GLES30.glCreateProgram()
+        GLES30.glAttachShader(prog, vert)
+        GLES30.glAttachShader(prog, frag)
+        GLES30.glLinkProgram(prog)
+        GLES30.glDeleteShader(vert)
+        GLES30.glDeleteShader(frag)
+        val status = IntArray(1)
+        GLES30.glGetProgramiv(prog, GLES30.GL_LINK_STATUS, status, 0)
+        if (status[0] == GLES30.GL_FALSE) {
+            Log.e(TAG, "Program link failed: ${GLES30.glGetProgramInfoLog(prog)}")
+        } else {
+            Log.d(TAG, "Shader program linked OK (id=$prog)")
+        }
+        prog
+    }
+
+    fun use() = GLES30.glUseProgram(id)
+
+    fun setFloat(name: String, v: Float) =
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(id, name), v)
+
+    fun setVec2(name: String, x: Float, y: Float) =
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(id, name), x, y)
+
+    fun setInt(name: String, v: Int) =
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(id, name), v)
+
+    fun setVec4(name: String, r: Float, g: Float, b: Float, a: Float) =
+        GLES30.glUniform4f(GLES30.glGetUniformLocation(id, name), r, g, b, a)
+
+    // Used for vec2 uniform arrays (e.g. vec2 u_influencer_pos[5]); values is interleaved x,y.
+    fun setVec2Array(name: String, values: FloatArray) {
+        val loc = GLES30.glGetUniformLocation(id, name)
+        if (loc == -1) return
+        GLES30.glUniform2fv(loc, values.size / 2, values, 0)
+    }
+
+    // Used for float uniform arrays (e.g. float u_bands[8]). Skips silently if optimized out.
+    fun setFloatArray(name: String, values: FloatArray) {
+        val loc = GLES30.glGetUniformLocation(id, name)
+        if (loc == -1) return
+        GLES30.glUniform1fv(loc, values.size, values, 0)
+    }
+
+    fun setMat4(name: String, value: FloatArray) {
+        val loc = GLES30.glGetUniformLocation(id, name)
+        if (loc == -1) return
+        GLES30.glUniformMatrix4fv(loc, 1, false, value, 0)
+    }
+
+    fun delete() = GLES30.glDeleteProgram(id)
+
+    private fun compileShader(type: Int, src: String): Int {
+        val shader = GLES30.glCreateShader(type)
+        GLES30.glShaderSource(shader, src)
+        GLES30.glCompileShader(shader)
+        val status = IntArray(1)
+        GLES30.glGetShaderiv(shader, GLES30.GL_COMPILE_STATUS, status, 0)
+        val label = if (type == GLES30.GL_VERTEX_SHADER) "vertex" else "fragment"
+        if (status[0] == GLES30.GL_FALSE) {
+            Log.e(TAG, "$label shader compile failed: ${GLES30.glGetShaderInfoLog(shader)}")
+        } else {
+            Log.d(TAG, "$label shader compiled OK")
+        }
+        return shader
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/gl/Shaders.kt =====
+package com.example.myfistapp.gl
+
+internal object Shaders {
+
+    // Shared passthrough vertex shader — identical for all full-screen quad programs.
+    val TEST_VERT = """
+        #version 300 es
+        layout(location = 0) in vec2 a_position;
+        out vec2 v_uv;
+        void main() {
+            v_uv = a_position * 0.5 + 0.5;
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+    """.trimIndent()
+
+    val TEST_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform float u_time;
+        uniform vec2  u_resolution;
+        uniform float u_peak;
+        uniform float u_beat;
+        uniform float u_bands[8];
+        in vec2 v_uv;
+        out vec4 fragColor;
+        void main() {
+            float wave = 0.5 + 0.5 * sin(u_time * (2.0 + u_peak * 8.0) + v_uv.x * 6.28);
+            vec3 color = vec3(v_uv.x, v_uv.y, wave);
+            color = mix(color, vec3(1.0), u_beat * 0.4);
+            color *= 0.4 + u_peak * 0.6;
+            fragColor = vec4(color, 1.0);
+        }
+    """.trimIndent()
+
+    val WARP_VERT    = TEST_VERT
+    val KALEIDO_VERT = TEST_VERT
+
+    val WARP_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const int INF_COUNT = 5;
+
+        uniform float u_time;
+        uniform vec2  u_resolution;
+        uniform float u_peak;
+        uniform float u_beat;
+        uniform float u_bands[8];
+        uniform float u_grid_dim;
+        uniform float u_dot_radius;
+        uniform vec2  u_influencer_pos[5];
+        uniform float u_influencer_strength[5];
+        uniform float u_inf_radius;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        vec2 computeOffset(vec2 homePos) {
+            vec2 total = vec2(0.0);
+            float r2   = u_inf_radius * u_inf_radius;
+            for (int k = 0; k < INF_COUNT; k++) {
+                vec2  diff = homePos - u_influencer_pos[k];
+                float d2   = dot(diff, diff);
+                if (d2 < r2 && d2 > 0.25) {
+                    float d    = sqrt(d2);
+                    float fall = 1.0 - d / u_inf_radius;
+                    float force = u_influencer_strength[k] * fall * fall;
+                    float sgn   = (mod(float(k), 2.0) < 1.0) ? 1.0 : -1.0;
+                    total += sgn * (diff / d) * force;
+                }
+            }
+            return total;
+        }
+
+        void main() {
+            vec2  fragCoord = v_uv * u_resolution;
+            float minDim    = min(u_resolution.x, u_resolution.y);
+            float cellSize  = minDim / u_grid_dim;
+
+            float hueBase = u_bands[0] * 200.0;
+            float sat     = clamp(0.65 + u_bands[2] * 0.35, 0.0, 1.0);
+            float bval    = clamp(0.45 + u_peak * 0.45 + u_beat * 0.10, 0.0, 1.0);
+
+            float minDist    = 1.0e6;
+            float closestMag = 0.0;
+
+            vec2 cellBase = floor(fragCoord / cellSize);
+
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    vec2  cell    = cellBase + vec2(float(dx), float(dy));
+                    vec2  homePos = (cell + 0.5) * cellSize;
+                    vec2  offset  = computeOffset(homePos);
+                    float d       = length(fragCoord - (homePos + offset));
+                    if (d < minDist) {
+                        minDist    = d;
+                        closestMag = length(offset);
+                    }
+                }
+            }
+
+            // smoothstep with edge0 < edge1 — well-defined per GLSL ES spec.
+            // At dot center (d=0): alpha=1. At outer radius (d=u_dot_radius): alpha=0.
+            float alpha = 1.0 - smoothstep(u_dot_radius * 0.4, u_dot_radius, minDist);
+
+            // Hue: base from low band + magnitude of displacement + slow time drift.
+            float hue = mod(hueBase + closestMag * 0.35 + u_time * 2.0, 360.0) / 360.0;
+            vec3  rgb = hsv2rgb(vec3(hue, sat, bval));
+
+            // Premultiply alpha into RGB; output fully opaque pixel (black between dots).
+            fragColor = vec4(rgb * alpha, 1.0);
+        }
+    """.trimIndent()
+
+    val DRIFT_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const int   NUM_BARS   = 32;
+        const int   NUM_BANDS  = 8;
+        const int   NUM_LAYERS = 4;
+        const int   HIST_FRAMES = 6;
+
+        // Layer read offsets into u_band_ring (1 slot ≈ 80 ms).
+        const int   LAG[4]          = int[4](0, 1, 3, 6);
+        const float LAYER_ALPHA[4]  = float[4](1.0, 0.75, 0.55, 0.40);
+        const float HUE_SHIFT[4]    = float[4](0.00, 0.12, 0.25, 0.38);
+
+        // 12 ticks × 8 bands: slot 0 = current, slot 11 = 11 ticks ago.
+        uniform float u_band_ring[96];
+        // 4 scrambles × 32 cols: u_scramble[layer*32 + col] = band index (0..7).
+        uniform float u_scramble[128];
+        uniform float u_time;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            float col_f    = v_uv.x * float(NUM_BARS);
+            int   col      = clamp(int(col_f), 0, NUM_BARS - 1);
+            float edgeFrac = fract(col_f);
+            float edgeAA   = smoothstep(0.0, 0.03, edgeFrac) * smoothstep(1.0, 0.97, edgeFrac);
+
+            vec3 result = vec3(0.0);
+
+            for (int l = 0; l < NUM_LAYERS; l++) {
+                int   bandIdx = int(u_scramble[l * NUM_BARS + col]);
+                float baseHue = float(bandIdx) / float(NUM_BANDS)
+                              + HUE_SHIFT[l] + u_time * 0.02;
+
+                // Ghost frames oldest→newest; newer ghosts paint over older.
+                for (int age = HIST_FRAMES - 1; age >= 0; age--) {
+                    int   tick = LAG[l] + age;
+                    float h    = u_band_ring[tick * NUM_BANDS + bandIdx];
+                    if ((1.0 - v_uv.y) <= h) {
+                        float t          = 1.0 - float(age) / float(HIST_FRAMES);
+                        float ghostAlpha = t * t * 0.55 * LAYER_ALPHA[l];
+                        float val        = (0.35 + h * 0.65) * 0.6;
+                        result = mix(result, hsv2rgb(vec3(baseHue, 0.85, val)), ghostAlpha);
+                    }
+                }
+            }
+
+            fragColor = vec4(result * edgeAA, 1.0);
+        }
+    """.trimIndent()
+
+    val KALEIDO_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const float PI = 3.14159265358979;
+
+        uniform sampler2D u_source;
+        uniform vec2      u_resolution;
+        uniform float     u_time;
+        uniform int       u_segments;
+        uniform float     u_rotation;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        void main() {
+            vec2  p        = v_uv - vec2(0.5);
+            float r        = length(p);
+            float angle    = atan(p.y, p.x) + u_rotation * u_time;
+
+            float segAngle = PI / float(u_segments);
+            angle = mod(angle, segAngle * 2.0);
+            if (angle > segAngle) angle = segAngle * 2.0 - angle;
+
+            vec2 sampleUV = clamp(
+                vec2(r * cos(angle), r * sin(angle)) + vec2(0.5),
+                0.0, 1.0
+            );
+            fragColor = texture(u_source, sampleUV);
+        }
+    """.trimIndent()
+
+    val CYCLONE_VERT = """
+        #version 300 es
+        layout(location = 0) in vec3 a_position;
+        layout(location = 1) in vec2 a_uv;
+        uniform mat4 u_mvp;
+        out vec2 v_uv;
+        void main() {
+            v_uv = a_uv;
+            gl_Position = u_mvp * vec4(a_position, 1.0);
+        }
+    """.trimIndent()
+
+    // Samples the rolling painter texture — no procedural logic here.
+    val CYCLONE_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform sampler2D u_painterTexture;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        void main() {
+            fragColor = texture(u_painterTexture, v_uv);
+        }
+    """.trimIndent()
+
+    // Painter uses the same fullscreen-quad vertex shader as the 2D modes.
+    val PAINTER_VERT = TEST_VERT
+
+    // Writes a solid hue band (varying with time) + vertical brightness gradient.
+    // Hue cycles every 20s so each stripe's age is visually readable.
+    val PAINTER_HUESTRIPE_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform float u_time;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            float hue = fract(u_time * 0.05);          // full cycle every 20s
+            float val = 0.4 + 0.6 * v_uv.y;           // darker bottom, brighter top
+            fragColor = vec4(hsv2rgb(vec3(hue, 1.0, val)), 1.0);
+        }
+    """.trimIndent()
+
+    // Audio-reactive painter: 8 frequency bands mapped to 8 vertical color columns.
+    // Each column's hue, brightness, and saturation track its band's energy.
+    val PAINTER_AUDIOPAINT_FRAG = """
+        #version 300 es
+        precision mediump float;
+        uniform float u_time;
+        uniform float u_peak;
+        uniform float u_beat_decay;
+        uniform float u_bands[8];
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            int   bandIdx = clamp(int(v_uv.x * 8.0), 0, 7);
+            float amp     = u_bands[bandIdx];
+            float hue     = float(bandIdx) / 8.0 + u_time * 0.008;
+            float sat     = 0.80 + amp * 0.20;
+            float val     = (0.25 + amp * 0.65) * (1.0 + u_beat_decay * 0.6)
+                          * (0.35 + 0.65 * v_uv.y);
+            fragColor = vec4(hsv2rgb(vec3(fract(hue), sat, clamp(val, 0.0, 1.0))), 1.0);
+        }
+    """.trimIndent()
+
+    // CYCLONE_KALEIDO_FRAG — White frame + 5% more zoomed kaleidoscope
+    val CYCLONE_KALEIDO_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        const float PI       = 3.14159265;
+        const int   SEGMENTS = 12;
+
+        uniform sampler2D u_content;
+        uniform vec2      u_resolution;
+        uniform float     u_kaleido_rotation;
+        uniform float     u_cyclone_angle;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        void main() {
+            float minDim   = min(u_resolution.x, u_resolution.y);
+            vec2  centered = (v_uv * u_resolution - u_resolution * 0.5) / minDim;
+
+            float r     = length(centered);
+            float theta = atan(centered.y, centered.x) + u_kaleido_rotation;
+
+            // 12-fold symmetry
+            float segAngle = 2.0 * PI / float(SEGMENTS);
+            theta = mod(theta, segAngle);
+            if (theta > segAngle * 0.5) theta = segAngle - theta;
+
+            // Kaleidoscope sampling (big coverage)
+            float frontU = mod(u_cyclone_angle / (2.0 * PI), 1.0);
+            float thetaU = (theta / (2.0 * PI)) * 2.0;
+            float radial = r * 1.9;
+
+            vec2 sampleUV = vec2(
+                fract(frontU + thetaU),
+                clamp(radial, 0.0, 1.0)
+            );
+
+            vec4 kaleido = texture(u_content, sampleUV);
+
+            // White frame with big circular window showing kaleidoscope
+            float holeRadius    = 0.52;
+            float isInsideHole  = step(r, holeRadius);
+            vec3  color         = mix(vec3(1.0), kaleido.rgb, isInsideHole);
+
+            fragColor = vec4(color, 1.0);
+        }
+    """.trimIndent()
+
+    // PrintHead painter v2: transparent gaps + audio-reactive colored dots.
+    // Non-dot pixels output alpha=0 so the painter FBO retains previous content in gaps.
+    // Requires GL_BLEND enabled during the painter pass (handled in AbstraktRenderer Pass 1).
+    // Jobs cycle every 5s; each job picks a random center (hash11) and a base hue.
+    // Dot brightness scales with u_peak; hue shifts per job. FBO aspect 4:1.
+    val PAINTER_PRINTHEAD_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        uniform float u_time;
+        uniform float u_peak;
+        uniform float u_bands[8];
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        const float JOB_DURATION  = 5.0;
+        const float CIRCLE_RADIUS = 0.18;
+        const float GRID_SIZE     = 24.0;
+        const float DOT_SIZE      = 4.0;
+
+        float hash11(float n) {
+            return fract(sin(n * 12.9898 + 78.233) * 43758.5453);
+        }
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            vec2 fboSize = vec2(1024.0, 256.0);
+            vec2 px      = v_uv * fboSize;
+
+            float jobIndex = floor(u_time / JOB_DURATION);
+
+            float cx = hash11(jobIndex * 1.0);
+            float cy = 0.3 + hash11(jobIndex * 1.7) * 0.4;
+            vec2 center = vec2(cx, cy);
+
+            vec2 gridPx = floor(px / GRID_SIZE) * GRID_SIZE + GRID_SIZE * 0.5;
+            vec2 gridUV = gridPx / fboSize;
+
+            // Aspect-correct distance: vec2(4,1) makes the test circular in pixel space.
+            vec2  aspectDelta    = (gridUV - center) * vec2(fboSize.x / fboSize.y, 1.0);
+            float distFromCenter = length(aspectDelta);
+
+            if (distFromCenter >= CIRCLE_RADIUS) {
+                fragColor = vec4(0.0);   // transparent — leave FBO content intact
+                return;
+            }
+
+            float distToCell = length(px - gridPx);
+            float dotMask    = 1.0 - smoothstep(DOT_SIZE - 0.5, DOT_SIZE + 0.5, distToCell);
+
+            if (dotMask < 0.01) {
+                fragColor = vec4(0.0);   // gap between dots inside circle — also transparent
+                return;
+            }
+
+            // Audio-reactive color: job-seeded hue, peak-driven brightness.
+            float baseHue   = hash11(jobIndex * 2.3);
+            float audioBoost = 0.6 + u_peak * 0.4;
+            vec3 col = hsv2rgb(vec3(baseHue, 0.85, audioBoost));
+
+            fragColor = vec4(col, dotMask);
+        }
+    """.trimIndent()
+
+    // Image painter: samples a bundled JPG asset. Horizontal position is driven by
+    // u_cyclone_angle so the image window scrolls in sync with cylinder rotation.
+    // Opaque (alpha 1.0) — overwrites FBO like HueStripe/AudioPaint.
+    // For a 4096-wide source image and 1024-wide FBO: 4 full revolutions per image cycle.
+    val PAINTER_IMAGE_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        uniform sampler2D u_image;
+        uniform float     u_image_width;    // source image width in pixels (e.g. 4096)
+        uniform float     u_cyclone_angle;  // rotation accumulator in radians
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        const float PI = 3.14159265;
+
+        void main() {
+            // One revolution advances the image window by (FBO_width / image_width).
+            // For 4096-wide image: window advances 0.25 per revolution → 4 revs per cycle.
+            float rotationProgress  = u_cyclone_angle / (2.0 * PI);
+            float fboFractionOfImage = 1024.0 / u_image_width;
+            float sourceU = rotationProgress + v_uv.x * fboFractionOfImage;
+
+            // GL_REPEAT wraps sourceU for values outside [0,1].
+            fragColor = vec4(texture(u_image, vec2(sourceU, v_uv.y)).rgb, 1.0);
+        }
+    """.trimIndent()
+
+    val DRIFT_POLAR_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        // NOTE: Bars are computed in polar space directly, not rendered cartesian
+        // and folded. The earlier two-pass attempt (vertical bars to FBO, then
+        // radial kaleido sample) failed because vertical fills are geometrically
+        // incompatible with radial sampling. Future visualizers with meaningful
+        // x/y structure may still want the FBO+kaleido pipeline.
+
+        const float PI          = 3.14159265358979;
+        const int   NUM_BARS    = 32;
+        const int   NUM_BANDS   = 8;
+        const int   NUM_LAYERS  = 4;
+        const int   HIST_FRAMES = 6;
+        const int   SEGMENTS    = 12;
+
+        const int   LAG[4]         = int[4](0, 1, 3, 6);
+        const float LAYER_ALPHA[4] = float[4](1.0, 0.75, 0.55, 0.40);
+        const float HUE_SHIFT[4]   = float[4](0.00, 0.12, 0.25, 0.38);
+
+        // 12 ticks x 8 bands: slot 0 = current, slot 11 = 11 ticks ago.
+        uniform float u_band_ring[96];
+        // 4 scrambles x 32 cols: u_scramble[layer*32 + col] = band index (0..7).
+        uniform float u_scramble[128];
+        uniform float u_time;
+        // CPU-side beat decay: spikes to 1.0 on beat, decays to 0 over ~200ms.
+        uniform float u_beat_decay;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            vec2  p     = v_uv - vec2(0.5);
+            float r     = length(p) * 2.0;         // 0 = center, 1 = inscribed-circle edge
+            float angle = atan(p.y, p.x);          // -PI..PI
+
+            // 12-fold kaleidoscope fold: unique wedge is [0, PI/12].
+            float segAngle = PI / float(SEGMENTS);  // 15 degrees
+            angle = mod(angle, 2.0 * segAngle);     // [0, 30 deg]
+            if (angle > segAngle) angle = 2.0 * segAngle - angle;  // mirror to [0, 15 deg]
+
+            // Map folded angle to column index (0..NUM_BARS-1).
+            float col_f    = (angle / segAngle) * float(NUM_BARS);
+            int   col      = clamp(int(col_f), 0, NUM_BARS - 1);
+            float edgeFrac = fract(col_f);
+            float edgeAA   = smoothstep(0.0, 0.04, edgeFrac)
+                           * smoothstep(1.0, 0.96, edgeFrac);
+
+            // ── Anchor layer (rendered first — solid foundation) ──────────────
+            // Uses layer-0 scramble with current bands (tick 0, no lag).
+            int   anchorBand = int(u_scramble[col]);   // layer 0 scramble
+            float anchorH    = u_band_ring[anchorBand]; // current (tick = 0)
+            vec3  result     = vec3(0.0);
+            if (r <= anchorH) {
+                // Deep navy base, flashes electric blue on beat.
+                vec3 anchorBase = vec3(0.04, 0.06, 0.55);
+                result = anchorBase * (1.0 + 0.4 * u_beat_decay);
+            }
+
+            // ── Ghost layers (oldest → newest, composite over anchor) ─────────
+            for (int l = 0; l < NUM_LAYERS; l++) {
+                int   bandIdx = int(u_scramble[l * NUM_BARS + col]);
+                float baseHue = float(bandIdx) / float(NUM_BANDS)
+                              + HUE_SHIFT[l] + u_time * 0.02;
+
+                // Ghost frames oldest to newest so newer frames paint over older.
+                for (int age = HIST_FRAMES - 1; age >= 0; age--) {
+                    int   tick = LAG[l] + age;
+                    float h    = u_band_ring[tick * NUM_BANDS + bandIdx];
+                    if (r <= h) {
+                        float t          = 1.0 - float(age) / float(HIST_FRAMES);
+                        float ghostAlpha = t * t * 0.55 * LAYER_ALPHA[l];
+                        float val        = (0.35 + h * 0.65) * 0.6;
+                        result = mix(result, hsv2rgb(vec3(baseHue, 0.85, val)), ghostAlpha);
+                    }
+                }
+            }
+
+            // Soft dark-hole at center, circular fade at inscribed-circle edge.
+            float fade = smoothstep(0.0, 0.08, r) * (1.0 - smoothstep(0.85, 1.0, r));
+
+            fragColor = vec4(result * edgeAA * fade, 1.0);
+        }
+    """.trimIndent()
+}
+
+===== ./app/src/main/java/com/example/myfistapp/ui/theme/Color.kt =====
+package com.example.myfistapp.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Purple80 = Color(0xFFD0BCFF)
+val PurpleGrey80 = Color(0xFFCCC2DC)
+val Pink80 = Color(0xFFEFB8C8)
+
+val Purple40 = Color(0xFF6650a4)
+val PurpleGrey40 = Color(0xFF625b71)
+val Pink40 = Color(0xFF7D5260)
+===== ./app/src/main/java/com/example/myfistapp/ui/theme/Theme.kt =====
+package com.example.myfistapp.ui.theme
+
+import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40
+
+    /* Other default colors to override
+    background = Color(0xFFFFFBFE),
+    surface = Color(0xFFFFFBFE),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F),
+    */
+)
+
+@Composable
+fun MyFistAppTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    // Dynamic color is available on Android 12+
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
+}
+===== ./app/src/main/java/com/example/myfistapp/ui/theme/Type.kt =====
+package com.example.myfistapp.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+
+// Set of Material typography styles to start with
+val Typography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    )
+    /* Other default text styles to override
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+    */
+)
+===== ./app/src/main/java/com/example/myfistapp/visualizers/GuitarStringsLayer.kt =====
+package com.example.myfistapp.visualizers
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.AudioSnapshot
+import com.example.myfistapp.audio.snapshotAt
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+private const val STRING_COUNT = 6
+private const val TRAIL_COUNT  = 4
+
+// Map each string to one of AudioAnalyzer's 8 envelope-derived bands.
+private val STRING_BAND  = intArrayOf(0, 2, 3, 4, 5, 7)
+
+// Visual oscillation in rad/s: 8–20 Hz range
+private val STRING_FREQ  = floatArrayOf(50.3f, 62.8f, 75.4f, 87.9f, 106.8f, 125.7f)
+
+// Phase offsets so strings don't all swing in unison
+private val STRING_PHASE = floatArrayOf(0f, 0.524f, 1.047f, 1.571f, 2.094f, 2.618f)
+
+// Base angles in radians — 6 strings spread from -12° to +13° within the 30° source wedge
+// that the kaleidoscope samples (centered on the +x axis at 0°). After the 12-fold fold
+// each string becomes 12 mirrored copies radiating from center.
+private val STRING_ANGLE = floatArrayOf(
+    (-12.0 * PI / 180.0).toFloat(),
+    ( -7.0 * PI / 180.0).toFloat(),
+    ( -2.0 * PI / 180.0).toFloat(),
+    (  3.0 * PI / 180.0).toFloat(),
+    (  8.0 * PI / 180.0).toFloat(),
+    ( 13.0 * PI / 180.0).toFloat(),
+)
+
+private val STRING_COLORS = arrayOf(
+    Color(1.00f, 0.15f, 0.15f),  // red
+    Color(1.00f, 0.55f, 0.00f),  // orange
+    Color(1.00f, 0.95f, 0.00f),  // yellow
+    Color(0.10f, 1.00f, 0.10f),  // green
+    Color(0.10f, 0.40f, 1.00f),  // blue
+    Color(0.70f, 0.10f, 1.00f),  // violet
+)
+
+@Composable
+fun GuitarStringsLayer(
+    audioFile: AudioFile?,
+    playbackFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    val currentAudioFile by rememberUpdatedState(audioFile)
+    val currentFraction  by rememberUpdatedState(playbackFraction)
+
+    // Ring buffer: normalized perpendicular displacement in [-1, 1], one row per string.
+    val dispHistory = remember { Array(STRING_COUNT) { FloatArray(TRAIL_COUNT) } }
+
+    // frameIndex drives Canvas redraws AND serves as the ring buffer write cursor.
+    var frameIndex by remember { mutableIntStateOf(0) }
+
+    // Single scratch path reused for all draw ops — zero per-frame allocation.
+    val scratchPath = remember { Path() }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            withFrameNanos { nanos ->
+                val tSec = nanos / 1_000_000_000f
+
+                val snap = currentAudioFile?.let { snapshotAt(it, currentFraction) }
+                    ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+                val head = frameIndex.mod(TRAIL_COUNT)
+                for (i in 0 until STRING_COUNT) {
+                    val band = snap.bands[STRING_BAND[i]]
+                    dispHistory[i][head] = band * sin(tSec * STRING_FREQ[i] + STRING_PHASE[i])
+                }
+                frameIndex++
+            }
+        }
+    }
+
+    Canvas(modifier = modifier) {
+        val frame    = frameIndex
+        val w        = size.width
+        val h        = size.height
+        val cx       = w / 2f
+        val cy       = h / 2f
+        val minDim   = min(w, h)
+
+        // Strings reach 40% of minDim from center — well inside the 0.5*minDim sample circle.
+        val radius     = minDim * 0.40f
+        val halfRadius = radius / 2f
+
+        // Maximum perpendicular displacement: 10% of minDim.
+        val maxDispPx = minDim * 0.10f
+
+        // Clamp so the quadratic control point (at halfRadius + disp⊥) stays within
+        // r = 0.45*minDim from center: sqrt(halfRadius² + disp²) ≤ 0.45*minDim
+        val clampPx = sqrt((0.45f * minDim) * (0.45f * minDim) - halfRadius * halfRadius)
+            .coerceAtLeast(1f)
+
+        val strokePx = 2.dp.toPx()
+
+        for (i in 0 until STRING_COUNT) {
+            val θ    = STRING_ANGLE[i]
+            val cosθ = cos(θ)
+            val sinθ = sin(θ)
+
+            // String endpoint (at full radius from center along θ)
+            val ex = cx + cosθ * radius
+            val ey = cy + sinθ * radius
+
+            val color = STRING_COLORS[i]
+
+            // Draw oldest trail first so newest (fully opaque) sits on top.
+            for (j in TRAIL_COUNT - 1 downTo 0) {
+                val idx      = (frame - 1 - j).mod(TRAIL_COUNT)
+                val rawDisp  = dispHistory[i][idx] * maxDispPx
+                val disp     = rawDisp.coerceIn(-clampPx, clampPx)
+                // Quadratic falloff: j=0→1.0, j=1→0.56, j=2→0.25, j=3→0.06 — trails vanish fast
+                val t     = 1f - j.toFloat() / TRAIL_COUNT
+                val alpha = t * t
+
+                // Quadratic control point: halfway along the string, displaced in the
+                // direction perpendicular to θ. Perpendicular to (cosθ, sinθ) is (-sinθ, cosθ).
+                val cpx = cx + cosθ * halfRadius + (-sinθ) * disp
+                val cpy = cy + sinθ * halfRadius +   cosθ  * disp
+
+                scratchPath.reset()
+                scratchPath.moveTo(cx, cy)
+                scratchPath.quadraticTo(cpx, cpy, ex, ey)
+
+                drawPath(
+                    path  = scratchPath,
+                    color = color.copy(alpha = alpha),
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
+            }
+        }
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/visualizers/KaleidoscopeShader.kt =====
+package com.example.myfistapp.visualizers
+
+// NOTE: This is no longer aiming to match the desktop frei0r kaleidoscope.
+// The "Echo" visualizer is evolving as its own thing under user direction.
+// Internal class names retain "Kaleidoscope" for code stability; user-facing
+// label is "Echo". Do not rename the class.
+//
+// AGSL (Android Graphics Shading Language) kaleidoscope post-effect.
+// Matches the visual character of the frei0r kaleid0sc0pe filter used in the
+// desktop abstrakt pipeline (full_pipeline.sh): 12-wedge radial mirror,
+// center at (0.5, 0.5), optional slow rotation.
+//
+// Sampling notes:
+//   - content.eval() takes pixel coordinates [0, resolution].
+//   - For pixels where r > 0.5 (outside the inscribed circle — screen corners),
+//     the folded sample coord can exceed [0, resolution]. Clamped to
+//     [0, resolution - 1] to avoid wrap-around. Corner pixels will sample
+//     from the nearest edge of the warpfield rather than from garbage memory.
+//     If this produces visible edge streaks, report to the user before fixing.
+
+internal val KALEIDOSCOPE_AGSL = """
+    const float PI = 3.14159265;
+
+    uniform shader content;
+    uniform int    segments;
+    uniform float  rotation;
+    uniform float2 resolution;
+
+    half4 main(float2 fragCoord) {
+        // Use a single scale (minDim) so the polar fold is circular, not elliptical.
+        // Without this, portrait screens produce ovals instead of radial wedges.
+        float minDim  = min(resolution.x, resolution.y);
+        float2 centered = (fragCoord - resolution * 0.5) / minDim;
+
+        float r     = length(centered);
+        float theta = atan(centered.y, centered.x) + rotation;
+
+        // Fold theta into one mirror-symmetric wedge of width segAngle
+        float segAngle = 2.0 * PI / float(segments);
+        theta = mod(theta, segAngle);
+        if (theta > segAngle * 0.5) {
+            theta = segAngle - theta;
+        }
+
+        // Back to pixel coords using the same minDim scale — clamp to [0, res-1]
+        float2 samplePos = clamp(
+            float2(cos(theta), sin(theta)) * r * minDim + resolution * 0.5,
+            float2(0.0),
+            resolution - 1.0
+        );
+        return content.eval(samplePos);
+    }
+""".trimIndent()
+
+===== ./app/src/main/java/com/example/myfistapp/visualizers/KaleidoscopeView.kt =====
+package com.example.myfistapp.visualizers
+
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import com.example.myfistapp.audio.AudioFile
+import kotlin.math.PI
+
+private const val SEGMENTS = 12
+private const val ROTATION_SPEED = 0.05f   // rad/s — ~125 s per full revolution
+
+private const val STRINGS_ENABLED = true
+
+private typealias EchoLayer = @Composable (AudioFile?, Float, Modifier) -> Unit
+
+private val warpfieldLayer: EchoLayer = { audioFile, playbackFraction, modifier ->
+    WarpfieldCanvas(audioFile = audioFile, playbackFraction = playbackFraction, modifier = modifier)
+}
+
+private val stringsLayer: EchoLayer = { audioFile, playbackFraction, modifier ->
+    GuitarStringsLayer(audioFile = audioFile, playbackFraction = playbackFraction, modifier = modifier)
+}
+
+@Composable
+fun KaleidoscopeCanvas(
+    audioFile: AudioFile?,
+    playbackFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    val shader = remember { RuntimeShader(KALEIDOSCOPE_AGSL) }
+    var rotation by remember { mutableFloatStateOf(0f) }
+
+    val layers = remember {
+        if (STRINGS_ENABLED) listOf(warpfieldLayer, stringsLayer)
+        else listOf(warpfieldLayer)
+    }
+
+    LaunchedEffect(Unit) {
+        var lastNanos = 0L
+        while (true) {
+            withFrameNanos { nanos ->
+                val dt = if (lastNanos == 0L) 0.016f
+                         else ((nanos - lastNanos) / 1_000_000_000f).coerceAtMost(0.1f)
+                lastNanos = nanos
+                rotation = (rotation + dt * ROTATION_SPEED) % (2f * PI.toFloat())
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            shader.setIntUniform("segments", SEGMENTS)
+            shader.setFloatUniform("rotation", rotation)
+            shader.setFloatUniform("resolution", size.width, size.height)
+            renderEffect = RenderEffect
+                .createRuntimeShaderEffect(shader, "content")
+                .asComposeRenderEffect()
+        },
+    ) {
+        layers.forEach { layer ->
+            layer(audioFile, playbackFraction, Modifier.fillMaxSize())
+        }
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/visualizers/WarpfieldView.kt =====
+package com.example.myfistapp.visualizers
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PointMode
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.dp
+import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.AudioSnapshot
+import com.example.myfistapp.audio.snapshotAt
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+private const val COLS = 40
+private const val ROWS = 70
+private const val DOT_COUNT = COLS * ROWS
+private const val INF_COUNT = 5
+private const val HUE_BUCKETS = 16
+
+// Per-influencer config: varied orbits, speeds, and initial phases so motion
+// is dense and distributed — one influencer is always near the +x source wedge
+// that the kaleidoscope samples from.
+private val INF_ORBIT = floatArrayOf(0.20f, 0.26f, 0.17f, 0.23f, 0.21f)  // fraction of w/h
+private val INF_SPEED = floatArrayOf(0.10f, 0.07f, 0.13f, 0.06f, 0.11f)  // rad/s
+private val INF_PHASE = floatArrayOf(0f, 1.257f, 2.513f, 3.770f, 5.026f) // 0°,72°,144°,216°,288°
+
+@Composable
+fun WarpfieldCanvas(
+    audioFile: AudioFile?,
+    playbackFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    // Home positions as fractions [0,1] — resolved to pixels inside Canvas
+    val homeX = remember { FloatArray(DOT_COUNT) { i -> (i % COLS + 0.5f) / COLS } }
+    val homeY = remember { FloatArray(DOT_COUNT) { i -> (i / COLS + 0.5f) / ROWS } }
+
+    // beatFlash is plain mutable (not Compose state) — read in draw, updated in effect
+    val beatFlash = remember { FloatArray(1) { 0f } }
+
+    // tick drives Canvas redraws: reading it inside the draw lambda registers an observer
+    var tick by remember { mutableLongStateOf(0L) }
+
+    // rememberUpdatedState lets the LaunchedEffect(Unit) see the latest playback position
+    val currentFraction by rememberUpdatedState(playbackFraction)
+    val currentAudioFile by rememberUpdatedState(audioFile)
+
+    LaunchedEffect(Unit) {
+        var lastNanos = 0L
+        while (true) {
+            withFrameNanos { nanos ->
+                val dt = if (lastNanos == 0L) 0.016f
+                         else ((nanos - lastNanos) / 1_000_000_000f).coerceAtMost(0.1f)
+                lastNanos = nanos
+
+                val snap = currentAudioFile?.let { snapshotAt(it, currentFraction) }
+                    ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+                if (snap.isBeat) beatFlash[0] = 1f
+                beatFlash[0] = (beatFlash[0] - dt * 3f).coerceAtLeast(0f)
+
+                tick = nanos  // triggers Canvas redraw via state observation
+            }
+        }
+    }
+
+    // Pre-allocated bucket buffers — cleared and refilled each frame, avoids per-frame allocation
+    val bucketPts = remember { Array(HUE_BUCKETS) { ArrayList<Offset>(DOT_COUNT / HUE_BUCKETS + 16) } }
+
+    Canvas(modifier = modifier) {
+        // Reading tick here registers this draw node as an observer —
+        // when tick changes the frame loop invalidates this Canvas for redraw.
+        val tSec = tick / 1_000_000_000f
+
+        val w = size.width
+        val h = size.height
+
+        val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
+            ?: AudioSnapshot(FloatArray(8), 0f, false)
+
+        val bf       = beatFlash[0]
+        val infR     = (0.18f + snap.bands[1] * 0.07f) * min(w, h)
+        val strength = 45f + snap.bands[0] * 85f + bf * 65f
+        val hueBase  = snap.bands[0] * 200f
+
+        // 5 influencers with independent orbits, speeds, and start phases —
+        // ensures at least one is near the +x axis at any given time (the slice
+        // the kaleidoscope samples), giving the mandala continuous motion.
+        val ix = FloatArray(INF_COUNT) { k ->
+            w / 2f + cos(tSec * INF_SPEED[k] + INF_PHASE[k]) * w * INF_ORBIT[k]
+        }
+        val iy = FloatArray(INF_COUNT) { k ->
+            h / 2f + sin(tSec * INF_SPEED[k] + INF_PHASE[k]) * h * INF_ORBIT[k]
+        }
+
+        for (b in 0 until HUE_BUCKETS) bucketPts[b].clear()
+
+        val dotPx = 4.dp.toPx()
+
+        for (i in 0 until DOT_COUNT) {
+            val hx = homeX[i] * w
+            val hy = homeY[i] * h
+            var dx = 0f
+            var dy = 0f
+
+            for (k in 0 until INF_COUNT) {
+                val ex = hx - ix[k]
+                val ey = hy - iy[k]
+                val d  = sqrt(ex * ex + ey * ey)
+                if (d < infR && d > 0.5f) {
+                    val fall  = 1f - d / infR
+                    val force = strength * fall * fall
+                    // alternating attract / repel per influencer
+                    val sign  = if (k % 2 == 0) 1f else -1f
+                    dx += sign * (ex / d) * force
+                    dy += sign * (ey / d) * force
+                }
+            }
+
+            val mag     = sqrt(dx * dx + dy * dy)
+            val maxDisp = (strength * 0.6f).coerceAtLeast(1f)
+            val tColor  = (mag / maxDisp).coerceIn(0f, 1f)
+            val hue     = (hueBase + tColor * 160f) % 360f
+            val bucket  = ((hue / 360f) * HUE_BUCKETS).toInt().coerceIn(0, HUE_BUCKETS - 1)
+            bucketPts[bucket].add(Offset(hx + dx, hy + dy))
+        }
+
+        val sat   = (0.65f + snap.bands[2] * 0.35f).coerceIn(0f, 1f)
+        val value = (0.45f + snap.bands[0] * 0.45f + bf * 0.1f).coerceIn(0f, 1f)
+
+        // One drawPoints call per non-empty bucket — 16 calls max vs 2800
+        for (b in 0 until HUE_BUCKETS) {
+            val pts = bucketPts[b]
+            if (pts.isEmpty()) continue
+            val hue   = (b + 0.5f) / HUE_BUCKETS * 360f
+            val color = hsvColor(hue, sat, value)
+            drawPoints(pts, PointMode.Points, color, strokeWidth = dotPx, cap = StrokeCap.Round)
+        }
+    }
+}
+
+private fun hsvColor(h: Float, s: Float, v: Float): Color {
+    val c = v * s
+    val x = c * (1f - abs((h / 60f) % 2f - 1f))
+    val m = v - c
+    return when {
+        h < 60f  -> Color(c + m, x + m, m)
+        h < 120f -> Color(x + m, c + m, m)
+        h < 180f -> Color(m, c + m, x + m)
+        h < 240f -> Color(m, x + m, c + m)
+        h < 300f -> Color(x + m, m, c + m)
+        else     -> Color(c + m, m, x + m)
+    }
+}
+
+===== ./app/src/main/java/com/example/myfistapp/visualizers/WaveformView.kt =====
+package com.example.myfistapp.visualizers
+
+import android.media.MediaPlayer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.myfistapp.audio.AudioFile
+import com.example.myfistapp.audio.loadAndAnalyze
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private val BgColor = Color(0xFF0A0A0F)
+private val NeonCyan = Color(0xFF00FFFF)
+private val DimWhite = Color(0x99FFFFFF)
+
+@Composable
+fun WaveformView() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var audioFile by remember { mutableStateOf<AudioFile?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var playbackFraction by remember { mutableStateOf(0f) }
+
+    val mediaPlayer = remember { MediaPlayer() }
+    DisposableEffect(Unit) {
+        onDispose { mediaPlayer.release() }
+    }
+
+    // Prepare MediaPlayer whenever a new file is loaded
+    LaunchedEffect(audioFile?.uri) {
+        val af = audioFile ?: return@LaunchedEffect
+        isPlaying = false
+        playbackFraction = 0f
+        withContext(Dispatchers.IO) {
+            try {
+                mediaPlayer.reset()
+                mediaPlayer.setDataSource(context, af.uri)
+                mediaPlayer.prepare()
+            } catch (_: Exception) {
+                // Waveform is still shown; Play will silently no-op until fixed
+            }
+        }
+        mediaPlayer.setOnCompletionListener {
+            isPlaying = false
+            playbackFraction = 0f
+        }
+    }
+
+    // Cursor sweeps at ~60 fps while playing
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            val dur = audioFile?.durationMs ?: 0L
+            if (dur > 0) playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
+            delay(16L)
+        }
+    }
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                isLoading = true
+                errorMsg = null
+                try {
+                    audioFile = loadAndAnalyze(context, uri)
+                } catch (e: Exception) {
+                    errorMsg = e.message ?: "Unknown error"
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgColor),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "abstrakt / waveform",
+                color = NeonCyan,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = { launcher.launch(arrayOf("audio/*")) },
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+            ) {
+                Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+
+            audioFile?.let { af ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "${af.durationMs / 1000}s · ${af.sampleRate} Hz · " +
+                        if (af.channelCount == 1) "mono" else "stereo",
+                    color = DimWhite,
+                    fontSize = 13.sp,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    isLoading -> CircularProgressIndicator(color = NeonCyan)
+                    errorMsg != null -> Text(
+                        text = "Error: $errorMsg",
+                        color = Color(0xFFFF4040),
+                        fontSize = 14.sp,
+                    )
+                    audioFile != null -> WaveformCanvas(
+                        audioFile = audioFile!!,
+                        playbackFraction = playbackFraction,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    else -> Text("No file loaded", color = DimWhite, fontSize = 14.sp)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            if (audioFile != null && !isLoading) {
+                Button(
+                    onClick = {
+                        if (isPlaying) {
+                            mediaPlayer.pause()
+                            isPlaying = false
+                        } else {
+                            try {
+                                mediaPlayer.start()
+                                isPlaying = true
+                            } catch (_: IllegalStateException) {
+                                // Player still preparing — ignore tap
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPlaying) Color(0xFFFF2D78) else NeonCyan,
+                    ),
+                ) {
+                    Text(
+                        text = if (isPlaying) "Pause" else "Play",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun WaveformCanvas(
+    audioFile: AudioFile,
+    playbackFraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val envelope = audioFile.amplitudeEnvelope
+        if (envelope.isEmpty()) return@Canvas
+
+        val w = size.width
+        val h = size.height
+        val centerY = h / 2f
+        val maxAmp = centerY * 0.9f
+
+        // One vertical bar per pixel (or per envelope sample, whichever is fewer)
+        val displayCount = w.toInt().coerceAtMost(envelope.size)
+        val strokeW = (w / displayCount).coerceAtLeast(1.5f)
+
+        for (i in 0 until displayCount) {
+            val envIdx = (i.toFloat() / displayCount * envelope.size)
+                .toInt().coerceIn(0, envelope.size - 1)
+            val amp = envelope[envIdx]
+            val x = w * i / displayCount
+            drawLine(
+                start = Offset(x, centerY - amp * maxAmp),
+                end = Offset(x, centerY + amp * maxAmp),
+                color = NeonCyan,
+                strokeWidth = strokeW,
+            )
+        }
+
+        // Playback cursor
+        if (playbackFraction > 0f) {
+            val cx = playbackFraction * w
+            drawLine(
+                start = Offset(cx, 0f),
+                end = Offset(cx, h),
+                color = Color.White,
+                strokeWidth = 2f,
+            )
+        }
+    }
+}
+
+===== ./app/src/main/res/drawable/ic_launcher_background.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9,0L9,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,0L19,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,0L29,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,0L39,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,0L49,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,0L59,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,0L69,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,0L79,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M89,0L89,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M99,0L99,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,9L108,9"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,19L108,19"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,29L108,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,39L108,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,49L108,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,59L108,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,69L108,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,79L108,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,89L108,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,99L108,99"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,29L89,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,39L89,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,49L89,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,59L89,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,69L89,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,79L89,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,19L29,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,19L39,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,19L49,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,19L59,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,19L69,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,19L79,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+</vector>
+
+===== ./app/src/main/res/drawable/ic_launcher_foreground.xml =====
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="85.84757"
+                android:endY="92.4963"
+                android:startX="42.9492"
+                android:startY="49.59793"
+                android:type="linear">
+                <item
+                    android:color="#44000000"
+                    android:offset="0.0" />
+                <item
+                    android:color="#00000000"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="nonZero"
+        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+</vector>
+===== ./app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+===== ./app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+===== ./app/src/main/res/values/colors.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
+===== ./app/src/main/res/values/strings.xml =====
+<resources>
+    <string name="app_name">MyFistApp</string>
+</resources>
+===== ./app/src/main/res/values/themes.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.MyFistApp" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
+===== ./app/src/main/res/xml/backup_rules.xml =====
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample backup rules file; uncomment and customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+   Note: This file is ignored for devices older than API 31
+   See https://developer.android.com/about/versions/12/backup-restore
+-->
+<full-backup-content>
+    <!--
+   <include domain="sharedpref" path="."/>
+   <exclude domain="sharedpref" path="device.xml"/>
+-->
+</full-backup-content>
+===== ./app/src/main/res/xml/data_extraction_rules.xml =====
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample data extraction rules file; uncomment and customize as necessary.
+   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   for details.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- TODO: Use <include> and <exclude> to control what is backed up.
+        <include .../>
+        <exclude .../>
+        -->
+    </cloud-backup>
+    <!--
+    <device-transfer>
+        <include .../>
+        <exclude .../>
+    </device-transfer>
+    -->
+</data-extraction-rules>
+===== ./app/src/test/java/com/example/myfistapp/ExampleUnitTest.kt =====
+package com.example.myfistapp
+
+import org.junit.Test
+
+import org.junit.Assert.*
+
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * See [testing documentation](http://d.android.com/tools/testing).
+ */
+class ExampleUnitTest {
+    @Test
+    fun addition_isCorrect() {
+        assertEquals(4, 2 + 2)
+    }
+}
+===== ./build.gradle.kts =====
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+}
+===== ./gradle.properties =====
+# Project-wide Gradle settings.
+# IDE (e.g. Android Studio) users:
+# Gradle settings configured through the IDE *will override*
+# any settings specified in this file.
+# For more details on how to configure your build environment visit
+# http://www.gradle.org/docs/current/userguide/build_environment.html
+# Specifies the JVM arguments used for the daemon process.
+# The setting is particularly useful for tweaking memory settings.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# When configured, Gradle will run in incubating parallel mode.
+# This option should only be used with decoupled projects. For more details, visit
+# https://developer.android.com/r/tools/gradle-multi-project-decoupled-projects
+# org.gradle.parallel=true
+# Kotlin code style for this project: "official" or "obsolete":
+kotlin.code.style=official
+===== ./gradle/gradle-daemon-jvm.properties =====
+#This file is generated by updateDaemonJvm
+toolchainUrl.FREE_BSD.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.FREE_BSD.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.LINUX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.LINUX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.MAC_OS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/73bcfb608d1fde9fb62e462f834a3299/redirect
+toolchainUrl.MAC_OS.X86_64=https\://api.foojay.io/disco/v3.0/ids/846ee0d876d26a26f37aa1ce8de73224/redirect
+toolchainUrl.UNIX.AARCH64=https\://api.foojay.io/disco/v3.0/ids/ec7520a1e057cd116f9544c42142a16b/redirect
+toolchainUrl.UNIX.X86_64=https\://api.foojay.io/disco/v3.0/ids/4c4f879899012ff0a8b2e2117df03b0e/redirect
+toolchainUrl.WINDOWS.AARCH64=https\://api.foojay.io/disco/v3.0/ids/9482ddec596298c84656d31d16652665/redirect
+toolchainUrl.WINDOWS.X86_64=https\://api.foojay.io/disco/v3.0/ids/39701d92e1756bb2f141eb67cd4c660e/redirect
+toolchainVersion=21
+
+===== ./gradle/wrapper/gradle-wrapper.properties =====
+#Mon May 04 20:48:29 PDT 2026
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionSha256Sum=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.4.1-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+===== ./local.properties =====
+## This file is automatically generated by Android Studio.
+# Do not modify this file -- YOUR CHANGES WILL BE ERASED!
+#
+# This file should *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Location of the SDK. This is only used by Gradle.
+# For customization when using a Version Control System, please read the
+# header note.
+sdk.dir=/home/onojk123/Android/Sdk
+===== ./notes/journal.md =====
+# Abstrakt Android — Project Journal
+
+## Week 1 — Day 1 (May 4, 2026)
+
+### Done
+- Installed Android Studio Panda 4 on Ubuntu 25.10
+- Configured KVM hardware acceleration (kvm-ok confirmed)
+- Created project: MyFistApp (typo, kept) at ~/AndroidStudioProjects/MyFistApp
+- Package: com.example.myfistapp
+- Min SDK: API 24, Build config: Kotlin DSL
+- Configured Pixel 8 emulator with API 35 (Google Play Intel x86_64 Atom)
+- "Hello Android!" runs on emulator
+- Modified default text → "Jonathan Kendall"
+- Pasted in RippleField visualizer:
+  - Tap-to-ripple gesture (detectTapGestures)
+  - Animated concentric circles (Canvas + Animatable)
+  - Hue-cycling background (LaunchedEffect)
+  - Tap counter (mutableStateOf + remember)
+  - Random hue per ripple
+- Initialized Git repo (branch: main)
+- Commit 1de1f36: week 1 state locked in
+
+### Learnings
+- Compose UI is "Kotlin with annotations" — feels alien without Kotlin fluency
+- Emulator first-boot is slow (5-10 min); subsequent boots ~30 sec
+- Yellow warnings (unused imports, mutableStateOf vs mutableIntStateOf, typos) don't block builds
+- BUILD SUCCESSFUL in 1s after first sync
+
+### Notes
+- Emulator is functional but slow — animations stutter
+- Real phone testing will be 5-10x faster (defer until weeks 4+)
+- 30 GB RAM laptop handles Android Studio + emulator fine
+- Code feels like magic right now — Kotlin Koans next week will fix this
+
+### Next (Week 2)
+- Kotlin Koans: https://play.kotlinlang.org/koans/
+- Target: ~14-28 hours over 2 weeks
+- Sections: Introduction → Conventions → Collections → Properties → Builders
+- DO NOT touch Android Studio code yet
+- Just learn Kotlin syntax in the browser playground
+
+### Standing rules
+- Every shipped Android visualizer must have a paired feature/UI
+- One platform first (Android), evaluate iOS after MVP
+- Pace: ~1 hour per session, 4-5 sessions per week
+
+
+## Week 1 — Day 2 (May 5, 2026)
+
+### Architecture correction
+- Project is an **offline renderer**, not real-time — same model as the Python parent
+- User picks an audio file → app decodes offline → (eventually) produces MP4
+- No microphone, no real-time processing, no streaming
+
+### Done — Tier 1: audio ingestion + waveform display
+- Created `audio/AudioFile.kt`:
+  - `data class AudioFile(uri, durationMs, sampleRate, channelCount, amplitudeEnvelope)`
+  - `suspend fun loadAndAnalyze(context, uri)`: full MediaExtractor + MediaCodec PCM decode loop
+  - RMS amplitude computed per ~50ms window, normalized to 0..1 FloatArray
+  - Handles anything MediaExtractor supports (mp3, wav, m4a, …)
+- Created `visualizers/WaveformView.kt`:
+  - SAF file picker via `OpenDocument` (no storage permission needed — SAF handles access)
+  - `loadAndAnalyze` runs on `Dispatchers.IO`, spinner shown during decode
+  - Mirror waveform: vertical bars symmetric top/bottom from centerline, one bar per canvas pixel
+  - MediaPlayer playback with play/pause button
+  - White cursor sweeps left→right at ~60fps via `LaunchedEffect` + `delay(16)`
+  - Visual style: `#0A0A0F` background, `#00FFFF` neon cyan waveform, hot pink pause button
+- Updated `AndroidManifest.xml`: `READ_MEDIA_AUDIO` (no `RECORD_AUDIO`)
+- Replaced `RippleField` with `WaveformView` in `MainActivity.kt`
+- Added `dev.sh`: terminal workflow script (build / install / run / log)
+- Commit dbbbfa9, pushed to origin/main
+
+### Tested
+- Voltage-Delayed.wav: 289s, 48000 Hz, stereo — decodes, renders, plays back
+- Cursor tracks playback position correctly
+- Play/pause, file repick, error handling all working
+
+### Learnings
+- MediaCodec is verbose but predictable: extractor feeds compressed frames, codec drains PCM16-LE
+- SAF (`OpenDocument`) grants URI access without any runtime permission request
+- `LaunchedEffect(key)` cancels and restarts cleanly — good pattern for playback cursor
+- `rememberCoroutineScope()` is the right hook for launching IO work from a button/callback
+- Coroutines available transitively via `lifecycle-runtime-ktx` — no extra dep needed
+
+### Next (Tier 2 — not this week)
+- Week 2 is still Kotlin Koans only — do not touch Android code
+- After Koans: frame-by-frame visualizer rendering (warpfield aesthetic on Canvas)
+- Then: MediaCodec + MediaMuxer encoding to MP4
+- Full offline render pipeline: file → decode → visualize → encode → share
+
+### Standing rules (updated)
+- This is offline, not real-time. Never add RECORD_AUDIO or streaming audio capture.
+- Every shipped Android visualizer must have a paired feature/UI
+- One platform first (Android), evaluate iOS after MVP
+- Pace: ~1 hour per session, 4-5 sessions per week
+
+---
+
+## Week 1 — Day 3 (May 5, 2026)
+
+### Overview
+
+Marathon session. Started with a Compose-Canvas + AGSL hybrid pipeline (three visualizers, no GL). Ended with a full OpenGL ES 3.0 renderer coexisting alongside the Compose stack — 5 visualizer modes across 7 slices committed and pushed. Scope expanded well past what was planned, and the architecture evolved twice mid-session in ways that weren't obvious at the start.
+
+### Done — Slices 1–3: Compose Canvas visualizers
+
+- Slice 1: `WarpfieldCanvas` — animated dot grid (40×70 = 2800 dots) driven by `AudioSnapshot`
+  - `AudioAnalyzer` / `snapshotAt()` extracts 8 pseudo-bands from the pre-decoded amplitude envelope: two window sizes for low/mid, RMS derivative for treble proxy, beat detection via 60-frame moving average threshold
+  - 5 influencer points orbit in screen space, repel nearby dots with inverse-square falloff; orbits are phase-staggered 72° apart so coverage is dense and distributed
+  - Playback fraction maps to envelope frame — offline render model maintained throughout
+- Slice 2: `KaleidoscopeCanvas` ("Echo") — applies a 12-fold radial mirror to whatever renders beneath it
+  - AGSL `RuntimeShader` (`KaleidoscopeShader.kt`) performs the fold on GPU via `graphicsLayer { renderEffect }`
+  - Sampling: folds angle into [0°, 15°] wedge, mirrors back; corners (r > 0.5 inscribed circle) clamped to avoid wrap-around artifacts
+  - User-facing label is "Echo"; internal class names kept as "Kaleidoscope" for stability
+- Slice 3: `GuitarStringsLayer` composited inside Echo — 6 radial strings, each mapped to one audio band, amplitude-driven spike height with 4-frame painted trail, mirrored by kaleido fold
+
+### Done — Slices 4a–4c: OpenGL ES 3.0 renderer
+
+The Compose pipeline was hitting CPU-side limits. Moved core rendering to GLES 3.0.
+
+- Slice 4a: renderer scaffold
+  - `AbstraktGLSurfaceView`: `GLSurfaceView` subclass, GLES 3.0 context, `RENDERMODE_CONTINUOUSLY`
+  - `AbstraktRenderer`: implements `GLSurfaceView.Renderer`; fullscreen quad (triangle strip), single VAO/VBO, shared vertex shader for all modes
+  - `GlCanvas` composable: wraps `AbstraktGLSurfaceView` in `AndroidView`, manages lifecycle via `DisposableEffect` + `LifecycleEventObserver` (kicks `onResume()` manually on first composition since observer won't fire retroactively for already-resumed lifecycle)
+  - `ShaderProgram`: compile + link helper, uniform location cache
+- Slice 4b: audio→GL bridge
+  - `AudioUniforms`: holds `@Volatile audioFile` and `@Volatile playbackFraction` (main thread writes, GL thread reads); `getSnapshot()` / `applyToProgram()` push `u_time`, `u_peak`, `u_beat`, `u_bands[8]`, `u_playback_fraction` each frame
+  - `AudioSnapshot`: `data class` shared between Compose and GL paths
+- Slice 4c: GL Warpfield port
+  - `WARP_FRAG`: procedural dot grid entirely in the fragment shader — cell-snapped Voronoi, 3×3 neighbor search per fragment, nearest-dot distance drives `smoothstep` glow; displacement computed from the same 5-influencer orbit logic as the Compose version (`Influencers.kt`)
+  - `WARP_VERT` / `KALEIDO_VERT` aliased to the shared passthrough vertex shader
+  - UI consolidation: 5-button row would have overflowed 1080px; collapsed to 4 buttons (Wave / Warp / Echo / Drift); GL_TEST mode retired from the UI; Compose `WarpfieldCanvas` kept as Echo's internal rendering layer
+
+### Done — Slice 5: Drift visualizer
+
+Second equalizer. Design goal: 32 scrambled-position bars in a 12-fold radial mandala, with layered ghost history and a solid beat-pulsed foundation.
+
+**First attempt: cartesian FBO + kaleido post-pass**
+Built the bars as vertical fills in a framebuffer object, then sampled that FBO through the kaleido fold shader. This rendered consistently black. Spent significant time diagnosing — ring buffer logcat looked correct, GL pipeline reported no errors, FBO reported `COMPLETE`.
+
+Root cause was geometric: the kaleido fold maps angles to [0°, 15°] in the source image, which constrains both cos and sin to be positive. `sampleUV = 0.5 + r·(cos θ, sin θ)` always ≥ 0.5 in both axes — the kaleido only ever samples the top-right quadrant of the FBO. Vertical bars fill bottom-upward; they live in the lower portion of the FBO. The kaleido never sees them. The two representations are geometrically incompatible.
+
+**Fix: single-pass polar shader (`DRIFT_POLAR_FRAG`)**
+Scrapped the FBO. Bars computed directly in polar coordinates: `r = length(uv − 0.5) × 2`, angle folded to [0°, 15°] for 12-fold symmetry, folded angle mapped to column index, bar membership test is `r ≤ h` (radial, not vertical). The kaleido fold and the bar geometry are now the same operation — no two-pass mismatch possible.
+
+- `DriftState`: ring buffer `bandRing[16 × 8]`, writes at 80ms intervals; exports `bandRingExport[12 × 8]` newest-first for the shader; 4 independent Fisher-Yates scrambles (seeds 42, 137, 293, 511) → `scrambleF[128]`
+- 4 ghost layers: read offsets [0, 1, 3, 6] ticks (lag 0/80/240/480ms), quadratic alpha falloff `t² × 0.55 × LAYER_ALPHA[l]`, 6 history frames per layer, independent hue shifts [0, 0.12, 0.25, 0.38]
+- Anchor layer: solid opaque base rendered first; same column → band mapping as ghost layer 0; beat-pulsed via CPU-side `beatDecay` field in `AbstraktRenderer` (spikes to 1.0 on `isBeat`, decays `× exp(−5dt)` each frame, τ ≈ 200ms); passed as `u_beat_decay`; anchor color deep navy `vec3(0.04, 0.06, 0.55)` → electric blue flash at beat peak
+- FBO helpers (`createFBO` / `destroyFBO`) kept as private methods on `AbstraktRenderer` for future visualizers with cartesian structure that genuinely want the two-pass approach
+
+### Notable debugging moments
+
+- **Logcat misread**: ring buffer data confirmed working (4 layers showed genuinely different band values); this ruled out `DriftState` as the bug source but cost a debugging round
+- **Wrong instruction**: mid-diagnosis, a logcat snippet showed the current GL program not matching `driftProgram` immediately before a `use()` call. Interpreted this as swapped program order and requested a program swap. The assistant correctly refused — those diagnostic checks fired *before* the respective `use()` calls, so "match=false" was expected behavior, not evidence of a swap. The swap would have introduced a real bug. Geometric analysis was the correct path.
+- **Logcat green ≠ visual works**: reinforced several times. "No GL errors, FBO COMPLETE, uniforms located" tells you the pipeline is healthy. It doesn't tell you whether you're sampling the right region of the framebuffer.
+
+### Known issues (not fixed)
+
+- `AudioAnalyzer` produces 8 band values but they come as 4 identical pairs (0=1, 2=3, 4=5, 6=7). The comment in `AudioAnalyzer.kt` acknowledges this — it's amplitude-envelope windowing, not real FFT. Deferred.
+- Anchor layer visual quality not eyes-on verified before commit. Emulator screenshots show the polar structure working; beat-pulse timing requires live device to evaluate. Flagged in commit message; tuning deferred.
+
+### Learnings
+
+- `@Volatile` is necessary but not sufficient for cross-thread GL state — it guarantees visibility, not atomicity. Fine for float/reference writes that are inherently atomic on JVM; would need locks for compound state.
+- `DisposableEffect` with a lifecycle observer won't fire for states already past — if the composable enters during `RESUMED`, `ON_RESUME` never fires. Manual kick required on first composition.
+- Polar coordinate shaders sidestep an entire class of sampling-compatibility bugs. If the output geometry is radial, compute it radially from the start — don't render cartesian then fold.
+- GLSL ES 3.0 supports non-constant array indexing in uniform arrays. This matters for the ring buffer lookup (`u_band_ring[tick * NUM_BANDS + bandIdx]`) — wasn't guaranteed in ES 2.0.
+- `smoothstep(a, b, x)` requires `a < b`. Verified per spec before using it for dot glow falloff.
+
+### Architecture state
+
+- Compose path: Wave (waveform + cursor), Echo (kaleido + warpfield + strings)
+- GL path: Warp (procedural dot grid), Drift (polar EQ mandala)
+- Echo is the only mode still on Compose Canvas; everything else is GL or static Canvas
+- `AudioFile` / `AudioSnapshot` / `snapshotAt()` are shared between both paths — single source of truth for audio state
+
+### Next candidates
+
+- Eyes-on the anchor layer on real hardware; tune brightness or ghost alpha if anchor reads as invisible
+- Fix `AudioAnalyzer` 4-pairs-in-8-slots — needs real FFT or at least more distinct window sizes
+- Port Echo to GL (would unify everything on the GL renderer and open the door to FBO + kaleido done correctly on a visualizer that actually has cartesian structure worth preserving)
+- MP4 export — the stated goal from day one; the frame-by-frame GL pipeline is now in place to support it
+- Swipe-gesture visualizer picker — toggle row will overflow when slice 6+ adds more modes
+- Design third equalizer or Drift variant; anchor layer needs its own tuning slice
+
+### Standing rules (updated)
+
+- This is offline, not real-time. Never add `RECORD_AUDIO` or streaming audio capture.
+- Every shipped Android visualizer must have a paired feature/UI
+- Logcat green is necessary but not sufficient — always eyes-on a new visualizer before committing
+- One platform first (Android), evaluate iOS after MVP
+- Pace: ~1 hour per session, 4-5 sessions per week
+
+---
+
+## Week 1 — Day 4 (May 5, 2026 — late evening session)
+
+### Overview
+
+Session 3 of May 5. Day 3 shipped the GL renderer, Drift, and a working audio-reactive visualizer stack. Day 4 went deeper: built the 3D Cyclone visualizer (slice 7a), then immediately refactored it into a painter chassis (slice 7b) — an architecture that reframes how every future visualizer in this engine gets built.
+
+Session started at 3pm wake-up. "Late evening" by the clock; subjectively a normal working window. Ended with two commits, one revert, and an architectural insight that changes the engine's direction.
+
+### Done — Slice 7a: Cyclone scaffold + painter mechanic
+
+3D rotating cylinder with a rolling painter FBO. Two-pass render: first pass runs a painter fragment shader into a 1024×256 framebuffer at a scissored stripe at the "rear angle" of the cylinder (the face pointing directly away from the camera, guaranteed hidden by back-face culling). Second pass renders the cylinder geometry sampling from that texture.
+
+Key engineering:
+- `CylinderGeometry.kt`: 64-segment triangle strip (130 vertices), interleaved [x,y,z,u,v], seam duplicated at u=0/u=1 with `GL_REPEAT` on S axis for seamless wrap
+- Camera at (0,0,3), perspective 45°, model rotates Y-axis at 2π/30s (one revolution per 30s)
+- `setEGLConfigChooser(8,8,8,8,16,0)`: 16-bit depth buffer allocated at context creation, not at `onSurfaceChanged`
+- Rear angle: `cycloneAngleRad + 3π/2`, not `+ π` (which is the side tangent, not the rear). Wrong value paints the visible face.
+- Scissor stripe is 16px wide at the rear column. When the stripe crosses x=1024, two separate scissored draws handle the wrap.
+- One-time black clear of the FBO in `onSurfaceCreated`. Never cleared in `onDrawFrame` — content persists and accumulates; old paint decays naturally as the cylinder overwrites it after ~30s.
+- FBO texture: `GL_REPEAT` (S axis), `GL_CLAMP_TO_EDGE` (T axis). Wraps horizontally for seamless cylinder seam; clamps vertically to keep top/bottom clean.
+
+Four timed screenshots (t=0, t=10, t=30, t=60s) confirmed rolling and discard cycle working. Committed as `ebf7a74`.
+
+### Done — Slice 7b: Painter chassis
+
+Immediately after shipping 7a, the painter was refactored into a swappable component system.
+
+- `Painter.kt`: `enum class Painter { HUE_STRIPE, AUDIO_PAINT }` plus `PainterEntry` (painter, vert, frag) and `allPainters()` registry. Adding a future painter = one fragment shader file + one entry in `allPainters()`.
+- `PAINTER_HUESTRIPE_FRAG`: renamed from 7a's `PAINTER_FRAG`. Time-driven HSV cycle, vertical brightness gradient, identity-identical behavior to 7a.
+- `PAINTER_AUDIOPAINT_FRAG`: new. `v_uv.x` maps to band index (0–7); hue from band index + slow time drift; brightness from `u_bands[i]` + `u_beat_decay`; saturation at 0.80 base + band amplitude. 8 vertical columns on the cylinder surface, each independent.
+- `AbstraktRenderer`: `painterPrograms: MutableMap<Painter, ShaderProgram>` replaces single `painterProgram`. All painters compiled at `onSurfaceCreated`. Per-frame, `audioUniforms.activePainter` selects which program paints.
+- Full painter contract pushed every frame to every painter: `u_time`, `u_peak`, `u_beat`, `u_beat_decay`, `u_bands[8]`, `u_playback_fraction`. Unused uniforms silently no-op at `loc=-1`. No per-painter branching in the renderer.
+- `AudioUniforms.activePainter`: `@Volatile var activePainter: Painter = Painter.HUE_STRIPE`. Main thread writes on button tap; GL thread reads each frame.
+- `MainActivity`: painter selection row rendered only when `currentViz == Viz.GL_CYCLONE`. Cyan highlight tracks active painter. Hidden for all other modes.
+
+Verified with audio playing: 5–7 distinct columns visibly brightening and shifting across the cylinder front face when audio drives `u_bands`. Committed as `bae17ba`.
+
+### Notable moments / debugging
+
+**Eyes-on discipline failure pattern — three instances.**
+
+This is the behavioral pattern that needs honest documentation because it happened three separate times tonight.
+
+1. After Drift's anchor layer (Day 3 close): the GL pipeline was healthy, ring buffer data differentiated, no errors. The assistant moved toward summary, the user typed "commit," the screenshots got captured anyway only after explicit prompting from one party or the other. Anchor layer was shipped visually unverified, acknowledged by note in the commit message. Emulator screenshots confirmed structure; beat-pulse timing remains untested under live conditions.
+
+2. After Cyclone 7a: screenshots were captured but the assistant moved toward summary rather than presenting them for explicit review. The four timed screenshots were the actual confirmation the rolling mechanic worked — but this required user prompting to execute.
+
+3. After AudioPaint 7b: the assistant described the Audio painter screenshot as showing "8 banded hue columns" with reactivity. User caught this and required actual eyes-on with audio playing before accepting. The confirmed result — 5–7 visible columns shifting with audio content — could not have been determined from a description. It required the user watching the device with audio running.
+
+Day 3's rule was "logcat green ≠ visual works." Day 4 adds: **Claude's screenshot description ≠ visual works either.** A description of what should be visible is not confirmation. The only valid confirmation for a new visualizer is the user looking at it. The only valid confirmation for an audio-reactive feature is the user looking at it with audio playing.
+
+**Painter contract generalization.** The initial 7b plan had painters scissor-locked to "paint only at rear angle." Discussion of PrintHead and Scanline ideas revealed this was too restrictive — those patterns need to paint across arbitrary x positions per frame. The contract was generalized: painter receives the full uniform set and handles its own region-of-interest logic. The scissor at the renderer level remains as a guard but is not the painter's only degree of freedom. This required no refactor — a broader contract and intent documentation were sufficient.
+
+**Drift v2 chartreuse + violet experiment.** Mid-session, Drift's multi-layer ghost stack hit a visual ceiling — translucent layers with scrambled hue assignments average toward gray mush as layers stack. A 2-layer redesign (chartreuse base + violet accent, high saturation, no random hue) was implemented and screencapped. Result was visually clean — no mush — but geometrically too simple; the form didn't change with audio content. Shelved. Shaders.kt reverted via git checkout to last committed state. Lesson: color theory problems and geometric complexity are separate problems. Solving the former doesn't address the latter.
+
+### Architectural insight: painter chassis as engine foundation
+
+The realization from tonight: **every future visualizer in this engine can be driven through the cylinder chassis.**
+
+Cyclone started as "one visualizer." It is now something different. The cylinder is a display surface. Painters are the visualizers. The cylinder (geometry, rotation, projection, FBO, two-pass renderer) stays fixed. Only the painter changes. As stated in the session: "all future visualizers can be driven through this can driver system."
+
+What this unlocks:
+- **PrintHead**: marks down columns at specific x positions on beat timing. Typewriter rolling across the surface.
+- **Scanline**: horizontal sweep across the full texture height, brightness modulated per-band. Oscilloscope on a can.
+- **BeatStrobe**: full-texture white flash on beat, decays to black. No hue, no columns. Pure rhythm.
+- **SpectrumPainter**: spectral waterfall, bands stacked as color rows scrolling upward.
+- **MP4Painter**: `SurfaceTexture` + `GL_TEXTURE_EXTERNAL_OES`. Android renders a playing video into the painter FBO; the cylinder displays it. This connects the Android engine directly to the desktop Abstrakt project's MP4 output — a video rendered in Python runs on the cylinder surface on Android. One entry in `allPainters()`. This bridges two projects that have never shared code. Documented and deferred to slice 8+.
+
+The chassis shipped with 2 painters. The architecture supports unlimited painters without modifying `AbstraktRenderer`.
+
+### Known issues (deferred)
+
+- `AudioAnalyzer` 4-pair-bands bug: still unfixed. Bands 0=1, 2=3, 4=5, 6=7 are identical pairs. AudioPaint's 8-column visual is partially duplicated as a result. Requires real FFT or more distinct windowing to fix.
+- Toggle row UI broken at 5 buttons: "Cyclone" text wraps vertically due to overflow. Painter row below it compounds the top-of-screen crowding. Swipe-gesture visualizer picker is the right replacement.
+- Drift anchor layer unconfirmed on real hardware under audio. Polar structure renders correctly in emulator; beat-pulse brightness and timing require live device with audio.
+- AudioPaint at zero-audio is very dim (val ≈ 0.09–0.25 with no file loaded). Correct behavior, but reads as "broken" before a file is picked.
+
+### Learnings
+
+- **Rear-angle math**: for Y-rotation by α, the rear face is at α + 3π/2, not α + π. α + π is the side tangent (z′ = 0), not the rear (min z′). Wrong formula paints the visible face.
+- **FBO clear discipline**: `glClear` the painter FBO exactly once in `onSurfaceCreated`. Never in `onDrawFrame`. Content must accumulate; clearing on every frame produces an empty cylinder.
+- **Scissor wrap at texture boundary**: when a stripe crosses x=1024, one scissor call is insufficient — it clips at the boundary. Two draws required: one for the right fragment, one for the wrapped-left fragment.
+- **`@Volatile` for painter enum selection**: sufficient because enum reference reads are atomic on JVM. Compound-state changes (painter + associated parameter reset together) would require a lock.
+- **`hsv2rgb` is a compile-unit problem**: GLSL ES has no `#include`. Every painter shader defines its own copy. This is correct; DRY doesn't apply to separate compile units.
+- **Eyes-on with audio playing is the only valid confirmation of audio-reactive behavior.** Screenshots without audio confirm geometry. Screenshots with audio confirm reactivity. Both are required before commit.
+
+### Next candidates
+
+- Add 2–3 more painters: PrintHead, Scanline, BeatStrobe — each estimated ~30 min, single shader file + one `allPainters()` entry
+- MP4Painter: `SurfaceTexture` bridge to desktop Abstrakt MP4 output — larger slice, probably 8+
+- Fix AudioAnalyzer 4-pair-bands bug: real FFT or more distinct windowing, required before AudioPaint's columns mean anything
+- Swipe-gesture visualizer picker: toggle row is visibly broken at 5 buttons, swipe replaces it entirely and scales to unlimited modes
+- Port Echo to GL: unifies the rendering path; enables proper kaleido FBO + cartesian source that genuinely benefits from two-pass
+- MP4 export: original stated goal from Day 1; frame-by-frame GL pipeline is now in place to support it
+
+### Standing rules (updated)
+
+- This is offline, not real-time. Never add `RECORD_AUDIO` or streaming audio capture.
+- Every shipped Android visualizer must have a paired feature/UI.
+- Logcat green is necessary but not sufficient — always eyes-on a new visualizer before committing.
+- **Claude's screenshot description is not confirmation. The only valid confirmation is the user looking at it. For audio-reactive features, audio must be playing.**
+- One platform first (Android), evaluate iOS after MVP.
+- Pace varies. Marathon sessions are fine when intentional. Three sessions in one calendar day is allowed; forcing energy that isn't there is not.
+
+### Late-session addendum: slice 7c kaleido — shipped
+
+Slice 7c (12-wedge kaleido overlay on Cyclone) was attempted, shelved, and resumed within the same session. v1 produced 12-fold symmetry but no relationship to cylinder content — the sampling math (`theta * 8 + r * 4`) generated a synthetic phase pattern that the kaleido folded, ignoring the painter FBO. v2 with `u_cyclone_angle` as the front-facing anchor was conceptually correct but compressed each wedge to ~4% of FBO width (`theta / (2π)`), making the mandala render as a near-uniform color tint that disappeared into the cylinder underneath. v3 = v2 + multiplier of 12.0 on `thetaU`, spanning ~50% of FBO per wedge — landed. Eyes-on verified: distinct radial spokes pull recognizable painter content, cylinder silhouette visible at edges, motion synced with rotation. The `frontU` anchor was the correct architecture; only the multiplier needed tuning. Cyclone is now feature-complete: cylinder + painter + chassis + kaleido fold.
+
+---
+
+### Late-session addendum: PrintHead chassis test + kaleido-monochrome finding
+
+Slice 7d (PrintHead v1, dotted circles, 0f0c42d) was the chassis flexibility test — first painter that breaks all the assumed rolling-painter patterns: doesn't anchor to the rear angle, ignores all audio uniforms, paints geometric shapes rather than continuous color. The chassis accepted it without a single renderer change, and the painter button auto-generated from the registry. Pattern validated for arbitrary future painters.
+
+Architectural finding: the kaleido overlay has an unstated dependency on painter content saturation. The kaleido samples the painter FBO and composites at 0.5 alpha; when the FBO is mostly black (as PrintHead leaves it once it dominates the texture), the fold has nothing to fold and the mandala layer disappears against the dark cylinder. Visible in the t30 capture: PrintHead's dotted circle reads cleanly on the cylinder body, but the 12-fold mandala is invisible. Correct behavior given the chassis architecture, not a bug — but worth knowing. Future painter design implication: painters that contribute meaningfully to the kaleido fold should output non-zero color in most pixels (colored backgrounds, audio-driven hues, dim non-black fills). Painters intended primarily as dot/line geometry on the cylinder body itself (like PrintHead) are valid but degrade the kaleido layer when they dominate the FBO. The chassis does not need changes; this is a content-design rule for the painter family going forward.
+
+---
+
+## Week 2 — Day 1 (May 6, 2026)
+
+### Overview
+
+Continuation of the Cyclone painter arc. Shipped slice 7f (ImagePainter), resolved a 15+ iteration kaleido tuning arc, and added beat-driven cylinder shake. Two commits pushed: `a47d489` (ImagePainter + kaleido + initial shake) and `7399732` (shake amplitude tune).
+
+### Done — Slice 7f: ImagePainter (4th painter)
+
+- `cyclone_image.jpg` (4096×256) bundled as a raw asset under `app/src/main/assets/`
+- `AbstraktRenderer` constructor changed to accept `Context` so the asset can be opened on the GL thread in `onSurfaceCreated` — safe because `Context.assets` is thread-safe for reads
+- Image decoded via `BitmapFactory` (`inScaled = false` to prevent density scaling) and uploaded via `GLUtils.texImage2D` to texture unit 1
+- `PAINTER_IMAGE_FRAG`: `sourceU = (cyclone_angle / 2π) + v_uv.x × (1024 / image_width)` — one FBO-width window of the image scrolls left with each revolution; at 4096px wide, the image cycles every 4 revolutions (~2 minutes)
+- `GL_REPEAT` on S axis so `sourceU` wraps seamlessly; `GL_CLAMP_TO_EDGE` on T to avoid vertical bleed
+- IMAGE painter binds image texture to unit 1 before the scissored draw, restores unit 0 afterward; no other painter is affected
+
+### Done — Kaleido tuning arc (kfix10–kfix17+)
+
+The kaleido design went through a long iteration arc this session. Root cause of all the intermediate failures was the same structural issue documented in the Day 4 addendum: sampling a 1D-varying texture (horizontal color bands) through a radial fold maps adjacent screen pixels to very different FBO columns, producing visible radial spoke lines. The final design sidesteps this geometrically rather than fighting it with alpha.
+
+**Attempts and what they revealed:**
+
+- `smoothstep(0.75, 0.95, r)` as outer mask (kfix10): first clearly visible mandala structure, but a white/bright halo ring appeared between r=0.417 and r=0.75 from `clamp(radial, 0.0, 1.0)` sampling the FBO top edge
+- `step(r, 0.92)` hard mask (kfix11): halo gone, but `r=0.92` covers the entire portrait viewport — the kaleido filled the screen with no cylinder visible at the edges
+- Fully opaque `fragColor = col` (kfix12): clean full-screen kaleido, confirmed Image painter working distinctly from HueStripe, but cylinder entirely occluded
+- Kaleido-outside + cylinder-through-hole (`1.0 - step(r, 0.55)`, kfix13): works — warm orange kaleido ring around center cylinder window. Revealed the cylinder IS visible through the hole and the Image content reads distinctly
+- White frame + kaleido through circular hole: white everywhere outside `holeRadius`, kaleido inside. First attempt looked solid black inside the hole — FBO only 50% filled at 15s warmup; 35s required for a full revolution at 2π/30s
+- `holeRadius = 0.50` (kfix15): circle exactly full screen width, white shows only in four corners
+- Radial multiplier 2.6 → 2.0 (kfix16): 30% larger/zoomed pattern, spokes visibly wider
+- Radial 2.0 → 1.9, holeRadius 0.52 (kfix17): final state — slightly more zoom, small breathing room at edge
+
+**Final shader design:** `radial = r * 1.9`, `holeRadius = 0.52`, `isInsideHole = step(r, holeRadius)`, `color = mix(vec3(1.0), kaleido.rgb, isInsideHole)`, `fragColor = vec4(color, 1.0)`. White frame outside the circle, kaleido inside, fully opaque. No mask artifacts, no halo, clean hard edge.
+
+**FBO warm-up gotcha:** Screenshots taken at 15s after app launch showed a solid black kaleido window — the painter had only painted ~50% of the FBO (half a revolution). The 35s baseline for any Cyclone screenshot is now established. Screenshots before one full revolution are unreliable for diagnosing kaleido content.
+
+### Done — Beat-driven cylinder shake
+
+- `shakeY = (beatDecay * 0.35f * Math.sin(timeSec * 45.0)).toFloat()` inserted as `Matrix.translateM(modelM, 0, 0f, shakeY, 0f)` immediately before the `rotateM` call
+- On beat: `beatDecay` spikes to 1.0, cylinder jolts ±35% of its height, damps out in ~200ms (τ = 1/5s decay constant)
+- 45 rad/s oscillation ≈ 7 Hz — fast enough to feel like a jolt rather than a sway
+- Kaleido overlay (Pass 3 fullscreen quad) is unaffected by the model matrix — cylinder shakes inside the circular window while the white frame stays fixed. This contrast is what makes the shake readable
+- Requires an audio file loaded and playing. `beatDecay` stays zero without audio; the shake is invisible in no-audio testing
+
+### Notable: Image painter UI tab coordinate fix
+
+Getting a reliable Image painter button tap required a `uiautomator dump` to find exact bounds `[806,734][894,787]` → center (850, 760). The button row was previously being tapped at (211, 189) which was hitting Hue on the scaled screenshot coordinates, not the actual device coordinates. All subsequent painter taps used the dump-verified coordinate.
+
+### Commits
+
+- `a47d489`: slice 7f: ImagePainter + kaleido overlay with beat-shake (5 files, 104 insertions, includes asset)
+- `7399732`: tune: strengthen cylinder beat-shake (0.35f amplitude, 45 rad/s)
+
+### Known issues / deferred
+
+- Beat shake not eyes-on verified with actual audio — `beatDecay` behavior confirmed in code review; live beat trigger under audio untested this session
+- `AudioAnalyzer` 4-pair-bands bug still unfixed — AudioPaint columns are partially duplicated
+- Cyclone button overflow in portrait (vertical text wrap) — swipe picker still deferred
+- `all_code.txt` in repo root is untracked and probably should be gitignored
+
+### Learnings
+
+- **FBO warm-up is 30s minimum for Cyclone.** One full revolution at 2π/30s must complete before any kaleido screenshot is diagnostic. A 15s screenshot is ~50% black FBO — it looks broken even when it's correct.
+- **Kaleido spoke artifacts are structural, not tunable.** Any `thetaU` multiplier > ~1.5 maps adjacent screen pixels to different FBO columns → visible radial lines. The fix is to not fight it — either use a fully opaque kaleido (covers the cylinder) or use the white-frame design that makes the spoke structure irrelevant by clamping the kaleido to a smaller disc where the spokes read as the intended pattern.
+- **`uiautomator dump` is the ground truth for tap coordinates.** Scaled screenshot pixel coordinates are not device coordinates. Get the actual bounds once; don't guess.
+- **The cylinder shake only needs one line of Kotlin.** `translateM` before `rotateM` is sufficient. The translate is in model space, so it moves the cylinder in world space before rotation is applied.
+
+### Next candidates
+
+- Eyes-on beat shake under real audio — confirm `beatDecay` fires visibly with a song playing
+- Fix AudioAnalyzer 4-pair-bands: real FFT (FFTW via JNI, or kissfft) or at minimum 8 genuinely distinct window sizes
+- Swipe picker for visualizer mode — toggle row is broken at 5 buttons
+- Slice 8: BeatStrobe painter — full-texture white flash on beat, simplest possible audio-reactive painter, pure rhythm signal
+- MP4Painter: `SurfaceTexture` bridge to desktop Abstrakt MP4 output (slice 8+ scope)
+- Gitignore `all_code.txt`
+
+---
+
+## Naming decision (May 4, 2026, end of day)
+
+- Local folder stays as `MyFistApp` (typo kept; Android Studio project structure references it)
+- GitHub repo published as `abstrakt-engine`
+- Framing: this is the rendering engine for the Abstrakt visualizer family
+- Future: visualizers plug into the engine; UI shell wraps the engine
+- Sister project: [onojk/abstrakt](https://github.com/onojk/abstrakt) (Python pipeline)
+
+===== ./settings.gradle.kts =====
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "MyFistApp"
+include(":app")
+
