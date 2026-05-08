@@ -106,6 +106,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var lastFrameLogMs  = 0L
     private var lastTimeLogMs   = 0L
     @Volatile var dumpPainterStatsOnNextFrame = false
+
+    fun toggleShape() {
+        currentShape = if (currentShape is CylinderShape) SphereShape() else CylinderShape()
+        Log.d(TAG, "toggleShape → ${currentShape.name}")
+    }
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.
     @Volatile var currentMode: Mode = Mode.Cyclone
     private var lastStampedMode: Mode? = null

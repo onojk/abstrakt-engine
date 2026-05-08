@@ -761,6 +761,7 @@ private fun VisualizerScreen() {
                             }
                             .pointerInput(currentMode) {
                                 detectTapGestures(
+                                    onDoubleTap = { glView.toggleShape() },
                                     onLongPress = {
                                         if (currentMode is Mode.UserSlot) showSlotSheet = true
                                         else glView.triggerPainterStatsDump()
