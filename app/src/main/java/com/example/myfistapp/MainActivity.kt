@@ -114,7 +114,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 
@@ -721,9 +723,11 @@ private fun VisualizerScreen() {
             ) {
                 when {
                     currentMode == Mode.AddSlot -> AddSlotPrompt(
-                        onClick   = { onAddSkinTapped() },
-                        onSwipe   = { delta -> dragAccum += delta },
-                        onSwipeEnd = {
+                        onClick      = { onAddSkinTapped() },
+                        onDelete     = { showDeletePicker = true },
+                        hasUserSkins = SkinSlotRegistry.filledSlots().isNotEmpty(),
+                        onSwipe      = { delta -> dragAccum += delta },
+                        onSwipeEnd   = {
                             val idx      = updatedModeIdx.value
                             val modeList = updatedModes.value
                             currentMode = when {
@@ -1129,7 +1133,13 @@ private fun ModeDot(mode: Mode, active: Boolean) {
 // ── AddSlot prompt ────────────────────────────────────────────────────────────
 
 @Composable
-private fun AddSlotPrompt(onClick: () -> Unit, onSwipe: (Float) -> Unit, onSwipeEnd: () -> Unit) {
+private fun AddSlotPrompt(
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    hasUserSkins: Boolean,
+    onSwipe: (Float) -> Unit,
+    onSwipeEnd: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1139,19 +1149,29 @@ private fun AddSlotPrompt(onClick: () -> Unit, onSwipe: (Float) -> Unit, onSwipe
                     onDragEnd = { onSwipeEnd() },
                     onHorizontalDrag = { _, delta -> onSwipe(delta) },
                 )
-            }
-            .clickable { onClick() },
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text("+", color = NeonCyan, fontSize = 64.sp, fontWeight = FontWeight.Light)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Add a Skin",
-            color = NeonCyan,
-            fontSize = 16.sp,
-            letterSpacing = 2.sp,
-        )
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onClick,
+            colors  = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
+            Spacer(Modifier.width(8.dp))
+            Text("Add a skin", color = Color.Black, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick  = onDelete,
+            enabled  = hasUserSkins,
+        ) {
+            Icon(Icons.Default.Delete, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Delete a skin")
+        }
     }
 }
 
