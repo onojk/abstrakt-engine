@@ -25,6 +25,13 @@ interface Shape {
      * Cylinder: 2π/30 (one full rotation every 30 seconds).
      */
     fun rotationSpeedRadPerSec(): Float
+
+    /**
+     * Uniform scale applied to the model matrix before rotation.
+     * 1.0 = cylinder reference size. Adjust per-shape so each geometry
+     * fills the kaleido frame consistently despite differing bounding shapes.
+     */
+    fun modelScale(): Float
 }
 
 data class ShapeMesh(

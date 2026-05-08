@@ -54,4 +54,6 @@ class CylinderShape : Shape {
     override fun rotationAxis() = floatArrayOf(0f, 1f, 0f)
 
     override fun rotationSpeedRadPerSec() = (2.0 * Math.PI / 30.0).toFloat()
+
+    override fun modelScale() = 1.0f
 }

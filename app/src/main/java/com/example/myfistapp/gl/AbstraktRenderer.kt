@@ -759,8 +759,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val mvpM   = FloatArray(16)
 
         val rotAxis = currentShape.rotationAxis()
+        val scale   = currentShape.modelScale()
         Matrix.setIdentityM(modelM, 0)
         Matrix.translateM(modelM, 0, shakeX, shakeY, 0f)
+        Matrix.scaleM(modelM, 0, scale, scale, scale)
         Matrix.rotateM(modelM, 0,
             Math.toDegrees(shapeAngleRad.toDouble()).toFloat(),
             rotAxis[0], rotAxis[1], rotAxis[2])
