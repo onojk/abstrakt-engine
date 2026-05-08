@@ -14,7 +14,7 @@ sealed class AudioSource {
 }
 
 enum class ExportResolution(val width: Int, val height: Int, val label: String, val bitrate: Int) {
-    HD_720P  (1280, 720,  "720p — small file, fast export",             5_000_000),
-    FHD_1080P(1920, 1080, "1080p — recommended",                       10_000_000),
-    UHD_4K   (3840, 2160, "4K — large file, slow export",              40_000_000),
+    HD_720P  (1280, 720,  "720p — small file, fast export",             8_000_000),
+    FHD_1080P(1920, 1080, "1080p — recommended",                       16_000_000),
+    UHD_4K   (3840, 2160, "4K — large file, slow export",              80_000_000),
 }
