@@ -125,6 +125,7 @@ internal val DimWhite = Color(0x99FFFFFF)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         setContent {
             MyFistAppTheme {
@@ -762,6 +763,7 @@ private fun VisualizerScreen() {
                                 detectTapGestures(
                                     onLongPress = {
                                         if (currentMode is Mode.UserSlot) showSlotSheet = true
+                                        else glView.triggerPainterStatsDump()
                                     },
                                 )
                             },

@@ -1,7 +1,9 @@
 package com.example.myfistapp.gl
 
 import android.content.Context
+import android.os.Build
 import android.opengl.GLSurfaceView
+import android.view.Surface
 import com.example.myfistapp.FrameShape
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioSnapshot
@@ -16,6 +18,22 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
         setRenderer(renderer)
         renderMode = RENDERMODE_CONTINUOUSLY
         preserveEGLContextOnPause = true
+
+        // Tell SurfaceFlinger this surface wants 120Hz so the adaptive display
+        // scheduler doesn't downclock the panel to 60Hz during idle, which
+        // causes the compositor to drop every other rendered frame → stutter.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                override fun surfaceCreated(h: android.view.SurfaceHolder) {
+                    h.surface.setFrameRate(
+                        120f,
+                        Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                    )
+                }
+                override fun surfaceChanged(h: android.view.SurfaceHolder, f: Int, w: Int, h2: Int) {}
+                override fun surfaceDestroyed(h: android.view.SurfaceHolder) {}
+            })
+        }
     }
 
     fun setAudioFile(file: com.example.myfistapp.audio.AudioFile?) = renderer.setAudioFile(file)
@@ -39,4 +57,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun invalidateUserSkinTexture(path: String) { queueEvent { renderer.invalidateUserSkinTexture(path) } }
     fun setRendererReadyCallback(cb: () -> Unit) { renderer.onReadyCallback = cb }
     fun setLiveSnapshot(snap: AudioSnapshot?)    { renderer.audioUniforms.liveSnapshot = snap }
+    fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
 }

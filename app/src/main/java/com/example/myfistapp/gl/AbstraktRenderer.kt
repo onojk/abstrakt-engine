@@ -97,6 +97,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var surfaceHeight = 1
     private var startTimeNs   = 0L
     private var lastFrameNs   = 0L
+    private var frameCount      = 0
+    private var lastFrameLogMs  = 0L
+    @Volatile var dumpPainterStatsOnNextFrame = false
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.
     @Volatile var currentMode: Mode = Mode.Cyclone
     private var lastStampedMode: Mode? = null
@@ -141,6 +144,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         fboTexId        = 0
         startTimeNs     = 0L
         lastFrameNs     = 0L
+        frameCount      = 0
+        lastFrameLogMs  = 0L
         lastStampedMode   = null   // force re-stamp after context loss
         allResourcesReady = false
         audioUniforms.uniformsLogged = false
@@ -426,6 +431,19 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val timeSec = (nowNs - startTimeNs) / 1_000_000_000f
         val dt      = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceAtMost(0.1f)
         lastFrameNs = nowNs
+
+        frameCount++
+        val fpsNow = System.currentTimeMillis()
+        if (lastFrameLogMs == 0L) lastFrameLogMs = fpsNow
+        if (fpsNow - lastFrameLogMs >= 5000) {
+            Log.d(TAG, "FPS over last 5s: ${"%.1f".format(frameCount * 1000.0 / (fpsNow - lastFrameLogMs))}")
+            frameCount = 0
+            lastFrameLogMs = fpsNow
+        }
+        if (dumpPainterStatsOnNextFrame) {
+            dumpPainterStatsOnNextFrame = false
+            debugPainterStats()
+        }
 
         val wW = surfaceWidth.toFloat()
         val wH = surfaceHeight.toFloat()
@@ -823,6 +841,29 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         destroyFBO()
 
         Log.d(TAG, "AbstraktRenderer: released all GL resources")
+    }
+
+    private fun debugPainterStats() {
+        val w = PAINTER_TEX_W
+        val h = PAINTER_TEX_H
+        val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, painterFBO)
+        GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, 0)
+        var sumR = 0L; var sumG = 0L; var sumB = 0L
+        var nonzeroPixels = 0
+        val totalPixels = w * h
+        buf.position(0)
+        for (i in 0 until totalPixels) {
+            val r = buf.get().toInt() and 0xFF
+            val g = buf.get().toInt() and 0xFF
+            val b = buf.get().toInt() and 0xFF
+            buf.get()
+            if (r > 1 || g > 1 || b > 1) nonzeroPixels++
+            sumR += r; sumG += g; sumB += b
+        }
+        Log.d(TAG, "Painter stats: avg=(${sumR/totalPixels},${sumG/totalPixels},${sumB/totalPixels}) " +
+            "nonzero=${nonzeroPixels}/${totalPixels} (${(nonzeroPixels * 100.0 / totalPixels).toInt()}%)")
     }
 
     private fun drawQuad() {
