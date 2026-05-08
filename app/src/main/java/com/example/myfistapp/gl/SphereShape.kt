@@ -67,6 +67,6 @@ class SphereShape : Shape {
 
     override fun modelScale() = 2.0f
 
-    // Sphere disc at scale=2.0 fills ~50% of shapeFBO width; zoom in 2× to fill frame.
-    override fun kaleidoZoom() = 0.65f
+    // Sphere disc at scale=2.0 fills ~50% of shapeFBO width; zoom out to fit frame.
+    override fun kaleidoZoom() = 0.88f
 }
