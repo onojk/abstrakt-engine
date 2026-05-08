@@ -687,6 +687,31 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glClearColor(0f, 0f, 0f, 1f)
     }
 
+    // Resets per-session animation state after a procedural warmup, preserving the painter
+    // FBO content (that's the whole point of warmup) and lastStampedMode.
+    fun resetAnimationState() {
+        cycloneAngleRad    = 0f
+        kaleidoRotationRad = 0f
+        collapseState.fill(0f)
+        collapsePhase.fill(0f)
+        collapseTimer.fill(0f)
+        beatDecay          = 0f
+        ribbonReadIsA      = true
+        if (ribbonFboA != 0) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, ribbonFboA)
+            GLES30.glClearColor(0f, 0f, 0f, 0f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        }
+        if (ribbonFboB != 0) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, ribbonFboB)
+            GLES30.glClearColor(0f, 0f, 0f, 0f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        Log.d(TAG, "resetAnimationState: encode-session state reset (painterFBO preserved)")
+    }
+
     // ── Release all GL resources — call from the same thread that owns the context. ──
 
     fun release() {

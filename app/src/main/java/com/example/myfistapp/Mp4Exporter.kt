@@ -180,6 +180,35 @@ class Mp4Exporter(
         }
         Log.d(TAG, "Encode start: ${width}x${height} @${fps}fps $totalFrames frames snapshots=${analyzedSnapshots?.size ?: 0}")
 
+        // ── Pre-warm: prime the painter FBO before the first encoded frame ────
+        // For skin modes (Builtin/UserSlot): triggers stampFullSkinIntoPainterFbo
+        // which fills the entire FBO instantly. UserSlot's texture may not be in
+        // cache yet — this render loads it; frame 0 of the encode then succeeds.
+        // For Cyclone: seeds the first stripe and sets lastStampedMode so the FBO
+        // isn't wiped on encode frame 0. Full warmup follows below.
+        renderer.currentMode = exportMode
+        renderer.renderFrame(width, height, 0f, dt, silentSnap, exportMode)
+        Log.d(TAG, "Pre-warm: painter primed for mode=$exportMode")
+
+        // Cyclone uses a procedural stripe-painter: the cylinder needs ~30 simulated
+        // seconds of renders to fully fill the 4096-wide painter FBO (one revolution).
+        val needsProceduralWarmup = (exportMode == Mode.Cyclone)
+        if (needsProceduralWarmup) {
+            val warmupFrames = 30 * fps
+            Log.d(TAG, "Running 30s procedural warmup for Cyclone ($warmupFrames frames)")
+            for (i in 0 until warmupFrames) {
+                currentCoroutineContext().ensureActive()
+                // No eglSwapBuffers — painter FBO accumulates stripes; nothing reaches encoder.
+                renderer.renderFrame(width, height, i * dt, dt, silentSnap, exportMode)
+                if (i % fps == 0) onProgress(i.toFloat() / warmupFrames, "Preparing visualizer…")
+            }
+            // Reset ephemeral animation counters so the encode starts from t=0.
+            // The painter FBO content is preserved — that's the whole point.
+            renderer.resetAnimationState()
+            Log.d(TAG, "Warmup complete; painter filled")
+        }
+        onProgress(0f, "Encoding video…")
+
         try {
             for (frameIndex in 0 until totalFrames) {
                 currentCoroutineContext().ensureActive()
