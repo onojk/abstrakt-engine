@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -234,6 +235,9 @@ private fun VisualizerScreen() {
     }
     LaunchedEffect(kaleidoSettings.squareRotationLocked) {
         glView.setSquareRotationLocked(kaleidoSettings.squareRotationLocked)
+    }
+    LaunchedEffect(kaleidoSettings.frameShape) {
+        glView.setFrameShape(kaleidoSettings.frameShape)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -891,6 +895,7 @@ private fun VisualizerScreen() {
                 settings                     = kaleidoSettings,
                 onFoldCountChange            = { kaleidoVm.setFoldCount(it) },
                 onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
+                onFrameShapeChange           = { kaleidoVm.setFrameShape(it) },
             )
         }
     }
@@ -1060,6 +1065,7 @@ private fun KaleidoSettingsContent(
     settings: KaleidoSettings,
     onFoldCountChange: (Int) -> Unit,
     onSquareRotationLockedChange: (Boolean) -> Unit,
+    onFrameShapeChange: (FrameShape) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1129,6 +1135,29 @@ private fun KaleidoSettingsContent(
                 color    = DimWhite,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Frame shape",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Color.White,
+        )
+        Spacer(Modifier.height(8.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding        = PaddingValues(horizontal = 4.dp),
+        ) {
+            items(FrameShape.entries) { shape ->
+                FilterChip(
+                    selected    = settings.frameShape == shape,
+                    onClick     = { onFrameShapeChange(shape) },
+                    label       = { Text(shape.name) },
+                    leadingIcon = if (settings.frameShape == shape) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                )
+            }
         }
 
         Spacer(Modifier.height(32.dp))

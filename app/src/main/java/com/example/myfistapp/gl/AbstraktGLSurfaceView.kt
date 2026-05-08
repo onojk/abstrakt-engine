@@ -2,6 +2,7 @@ package com.example.myfistapp.gl
 
 import android.content.Context
 import android.opengl.GLSurfaceView
+import com.example.myfistapp.FrameShape
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioSnapshot
 
@@ -25,6 +26,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setKaleidoFolds(folds: Float)        { renderer.kaleidoFolds = folds }
     fun setFoldCount(count: Int)              { renderer.foldCount = count }
     fun setSquareRotationLocked(value: Boolean) { renderer.squareRotationLocked = value }
+    fun setFrameShape(value: FrameShape)         { renderer.frameShape = value }
     fun setRibbonColor(r: Float, g: Float, b: Float) {
         renderer.ribbonColor[0] = r
         renderer.ribbonColor[1] = g

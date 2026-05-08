@@ -30,4 +30,8 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setSquareRotationLocked(value: Boolean) {
         viewModelScope.launch { store.setSquareRotationLocked(value) }
     }
+
+    fun setFrameShape(value: FrameShape) {
+        viewModelScope.launch { store.setFrameShape(value) }
+    }
 }

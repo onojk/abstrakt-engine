@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import com.example.myfistapp.FrameShape
 import com.example.myfistapp.Mode
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.AudioSnapshot
@@ -77,6 +78,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     @Volatile var kaleidoFolds          = 12f
     @Volatile var foldCount             = 12
     @Volatile var squareRotationLocked  = false
+    @Volatile var frameShape: FrameShape = FrameShape.Circle
+    private var frameOverlayProgram: ShaderProgram? = null
+    private var kaleidoFBO  = 0
+    private var kaleidoTex  = 0
+    private var kaleidoTexW = 0
+    private var kaleidoTexH = 0
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -117,10 +124,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         imageTexture    = 0
         imageWidth      = 0
         imageHeight     = 0
-        ribbonProgram   = null
-        blitProgram     = null
+        ribbonProgram        = null
+        blitProgram          = null
+        frameOverlayProgram  = null
         ribbonFboA = 0; ribbonTexA = 0
         ribbonFboB = 0; ribbonTexB = 0
+        kaleidoFBO = 0; kaleidoTex = 0; kaleidoTexW = 0; kaleidoTexH = 0
         ribbonReadIsA    = true
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -146,8 +155,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             painterPrograms[entry.painter] = ShaderProgram(entry.vert, entry.frag)
         }
 
-        ribbonProgram  = ShaderProgram(Shaders.TEST_VERT, Shaders.RIBBON_FRAG)
-        blitProgram    = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
+        ribbonProgram       = ShaderProgram(Shaders.TEST_VERT, Shaders.RIBBON_FRAG)
+        blitProgram         = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
+        frameOverlayProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.FRAME_OVERLAY_FRAG)
 
         // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
         val vaos = IntArray(1)
@@ -338,6 +348,36 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             else "ERROR 0x${status.toString(16)}"
         }")
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+    }
+
+    private fun createKaleidoFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        kaleidoTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        kaleidoFBO = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, kaleidoFBO)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, kaleidoTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        kaleidoTexW = w
+        kaleidoTexH = h
+        Log.d(TAG, "kaleidoFBO: ${w}x${h} fbo=$kaleidoFBO tex=$kaleidoTex")
+    }
+
+    private fun destroyKaleidoFBO() {
+        if (kaleidoTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(kaleidoTex), 0); kaleidoTex = 0 }
+        if (kaleidoFBO != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(kaleidoFBO), 0); kaleidoFBO = 0 }
+        kaleidoTexW = 0; kaleidoTexH = 0
     }
 
     private fun destroyRibbonFBOs() {
@@ -666,12 +706,17 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_CULL_FACE)
 
-        // ── Pass 3: Kaleido overlay — alpha-blended mandala over cylinder ─────
+        // ── Pass 3: Kaleido → intermediate FBO ───────────────────────────────
         val kProg = kaleidoProgram
         if (kProg != null) {
+            if (kaleidoFBO == 0 || kaleidoTexW != surfaceWidth || kaleidoTexH != surfaceHeight) {
+                destroyKaleidoFBO()
+                createKaleidoFBO(surfaceWidth, surfaceHeight)
+            }
             kaleidoRotationRad += dt * 0.05f
-            GLES30.glEnable(GLES30.GL_BLEND)
-            GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, kaleidoFBO)
+            GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+            GLES30.glDisable(GLES30.GL_BLEND)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
             kProg.use()
@@ -685,7 +730,24 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
             drawQuad()
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-            GLES30.glDisable(GLES30.GL_BLEND)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+            // ── Pass 4: Frame overlay → screen / encoder surface ──────────────
+            val foProg = frameOverlayProgram
+            if (foProg != null) {
+                GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                GLES30.glDisable(GLES30.GL_BLEND)
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+                foProg.use()
+                foProg.setInt("u_kaleido_tex", 0)
+                foProg.setVec2("u_resolution", wW, wH)
+                foProg.setInt("u_frame_shape", frameShape.ordinal)
+                foProg.setVec4("u_frame_color", 1f, 1f, 1f, 1f)
+                foProg.setFloat("u_frame_size", 0.52f)
+                drawQuad()
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            }
         }
 
         GLES30.glClearColor(0f, 0f, 0f, 1f)
@@ -726,8 +788,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         kaleidoProgram?.delete(); kaleidoProgram = null
         painterPrograms.values.forEach { it.delete() }
         painterPrograms.clear()
-        ribbonProgram?.delete(); ribbonProgram = null
-        blitProgram?.delete();   blitProgram   = null
+        ribbonProgram?.delete();       ribbonProgram       = null
+        blitProgram?.delete();         blitProgram         = null
+        frameOverlayProgram?.delete(); frameOverlayProgram = null
 
         if (vaoId        != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),        0); vaoId        = 0 }
         if (vboId        != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),        0); vboId        = 0 }
@@ -749,6 +812,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         }
         userSkinTextureCache.clear()
 
+        destroyKaleidoFBO()
         destroyRibbonFBOs()
         destroyFBO()
 

@@ -331,13 +331,97 @@ internal object Shaders {
             );
 
             vec4 kaleido = texture(u_content, sampleUV);
+            fragColor = kaleido;
+        }
+    """.trimIndent()
 
-            // White frame with big circular window showing kaleidoscope
-            float holeRadius    = 0.52;
-            float isInsideHole  = step(r, holeRadius);
-            vec3  color         = mix(vec3(1.0), kaleido.rgb, isInsideHole);
+    // FRAME_OVERLAY_FRAG — SDF shape mask applied to kaleido FBO output.
+    // Shapes (u_frame_shape): 0=None, 1=Circle, 2=Square, 3=Rounded, 4=Hexagon, 5=Octagon, 6=Star
+    // Coordinates normalised to shorter screen dimension (same basis as kaleido shader).
+    val FRAME_OVERLAY_FRAG = """
+        #version 300 es
+        precision highp float;
 
-            fragColor = vec4(color, 1.0);
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        uniform sampler2D u_kaleido_tex;
+        uniform vec2      u_resolution;
+        uniform int       u_frame_shape;
+        uniform vec4      u_frame_color;
+        uniform float     u_frame_size;
+
+        vec2 centeredCoord(vec2 uv, vec2 res) {
+            float minDim = min(res.x, res.y);
+            return (uv * res - res * 0.5) / minDim;
+        }
+
+        float sdfCircle(vec2 p, float r) {
+            return length(p) - r;
+        }
+
+        float sdfBox(vec2 p, float h) {
+            vec2 d = abs(p) - vec2(h);
+            return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+        }
+
+        float sdfRoundedBox(vec2 p, float h, float corner) {
+            return sdfBox(p, h - corner) - corner;
+        }
+
+        float sdfHexagon(vec2 p, float r) {
+            vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+            p = abs(p);
+            p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+            p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+            return length(p) * sign(p.y);
+        }
+
+        float sdfOctagon(vec2 p, float h) {
+            vec3 k = vec3(-0.9238795325, 0.3826834323, 0.4142135623);
+            p = abs(p);
+            p -= 2.0 * min(dot(vec2( k.x, k.y), p), 0.0) * vec2( k.x, k.y);
+            p -= 2.0 * min(dot(vec2(-k.x, k.y), p), 0.0) * vec2(-k.x, k.y);
+            p -= vec2(clamp(p.x, -k.z * h, k.z * h), h);
+            return length(p) * sign(p.y);
+        }
+
+        float sdfStar5(vec2 p, float r, float rf) {
+            vec2 k1 = vec2(0.809016994, -0.587785252);
+            vec2 k2 = vec2(-k1.x, k1.y);
+            p.x = abs(p.x);
+            p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+            p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+            p.x = abs(p.x);
+            p.y -= r;
+            vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
+            float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+            return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+        }
+
+        void main() {
+            vec4 kaleido = texture(u_kaleido_tex, v_uv);
+
+            if (u_frame_shape == 0) {
+                fragColor = kaleido;
+                return;
+            }
+
+            vec2  p   = centeredCoord(v_uv, u_resolution);
+            float h   = u_frame_size;
+            float sdf = 1.0;
+
+            if      (u_frame_shape == 1) sdf = sdfCircle(p, h);
+            else if (u_frame_shape == 2) sdf = sdfBox(p, h);
+            else if (u_frame_shape == 3) sdf = sdfRoundedBox(p, h, h * 0.2);
+            else if (u_frame_shape == 4) sdf = sdfHexagon(p, h);
+            else if (u_frame_shape == 5) sdf = sdfOctagon(p, h);
+            else if (u_frame_shape == 6) sdf = sdfStar5(p, h, 0.5);
+
+            float pw   = 1.5 / min(u_resolution.x, u_resolution.y);
+            float mask = 1.0 - smoothstep(-pw, pw, sdf);
+
+            fragColor = mix(u_frame_color, kaleido, mask);
         }
     """.trimIndent()
 
