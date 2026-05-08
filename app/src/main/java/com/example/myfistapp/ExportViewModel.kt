@@ -13,11 +13,21 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
 class ExportViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val kaleidoStore = KaleidoSettingsStore(app)
+
+    // ── Kaleido export settings ───────────────────────────────────────────────
+
+    private val _exportKaleido = MutableStateFlow(KaleidoSettings())
+    val exportKaleido: StateFlow<KaleidoSettings> = _exportKaleido.asStateFlow()
+
+    fun updateExportKaleido(settings: KaleidoSettings) { _exportKaleido.value = settings }
 
     // ── Wizard visibility ─────────────────────────────────────────────────────
 
@@ -100,6 +110,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _currentAudioFile.value = audioFile
         _step.value             = WizardStep.MODE
         _isWizardOpen.value     = true
+        viewModelScope.launch { _exportKaleido.value = kaleidoStore.settingsFlow.first() }
     }
 
     // Closes the wizard UI without canceling an in-progress export.
@@ -178,17 +189,22 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val pfd = ctx.contentResolver.openFileDescriptor(storeUri, "w")
                     ?: throw IOException("Cannot open output file")
+                val kaleido = _exportKaleido.value
                 val exporter = Mp4Exporter(
-                    context             = ctx,
-                    width               = res.width,
-                    height              = res.height,
-                    fps                 = fps,
-                    bitrate             = res.bitrate,
-                    audioFile           = resolvedAudio,
-                    exportMode          = mode,
-                    userSkinFilePath    = userSkinPath,
-                    beatResponseEnabled = _beatResponse.value,
-                    outputFd            = pfd.fileDescriptor,
+                    context                      = ctx,
+                    width                        = res.width,
+                    height                       = res.height,
+                    fps                          = fps,
+                    bitrate                      = res.bitrate,
+                    audioFile                    = resolvedAudio,
+                    exportMode                   = mode,
+                    userSkinFilePath             = userSkinPath,
+                    beatResponseEnabled          = _beatResponse.value,
+                    outputFd                     = pfd.fileDescriptor,
+                    kaleidoFoldCount             = kaleido.foldCount,
+                    kaleidoSquareRotationLocked  = kaleido.squareRotationLocked,
+                    kaleidoFrameShape            = kaleido.frameShape,
+                    kaleidoFrameColorArgb        = kaleido.frameColorArgb,
                 )
                 val result = exporter.export { fraction, phase ->
                     _progressValue.value = fraction
@@ -261,6 +277,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _exportedName.value     = ""
         _exportedSize.value     = 0L
         _showCancelDialog.value = false
+        _exportKaleido.value    = KaleidoSettings()
     }
 
     override fun onCleared() {

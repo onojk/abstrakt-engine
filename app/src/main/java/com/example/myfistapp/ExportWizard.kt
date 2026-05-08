@@ -48,6 +48,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Slider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.myfistapp.audio.AudioFile
 import java.io.IOException
@@ -56,7 +67,7 @@ import java.time.format.DateTimeFormatter
 
 // ── Wizard step tracking ──────────────────────────────────────────────────────
 
-internal enum class WizardStep { MODE, AUDIO, BEAT, RESOLUTION, PROGRESS, DONE }
+internal enum class WizardStep { MODE, AUDIO, BEAT, RESOLUTION, KALEIDO, PROGRESS, DONE }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -82,7 +93,8 @@ fun ExportWizard(
     val exportedUri     by vm.exportedUri.collectAsStateWithLifecycle()
     val exportedName    by vm.exportedName.collectAsStateWithLifecycle()
     val exportedSize    by vm.exportedSize.collectAsStateWithLifecycle()
-    val showCancelDialog by vm.showCancelDialog.collectAsStateWithLifecycle()
+    val showCancelDialog  by vm.showCancelDialog.collectAsStateWithLifecycle()
+    val exportKaleido     by vm.exportKaleido.collectAsStateWithLifecycle()
 
     val dismiss = onClose
 
@@ -140,7 +152,14 @@ fun ExportWizard(
             selected   = selectedRes,
             onSelect   = { vm.selectResolution(it) },
             onBack     = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
-            onStart    = { vm.startExport() },
+            onStart    = { vm.navTo(WizardStep.KALEIDO) },
+        )
+
+        WizardStep.KALEIDO -> Step5Kaleido(
+            kaleidoSettings = exportKaleido,
+            onUpdate        = { vm.updateExportKaleido(it) },
+            onBack          = { vm.navTo(WizardStep.RESOLUTION) },
+            onStart         = { vm.startExport() },
         )
 
         WizardStep.PROGRESS -> {
@@ -150,7 +169,7 @@ fun ExportWizard(
                 ((elapsed / progressValue.toDouble()) * (1.0 - progressValue)).toLong()
             } else -1L
 
-            Step5Progress(
+            Step6Progress(
                 progress = progressValue,
                 phase    = progressPhase,
                 etaMs    = etaMs,
@@ -312,9 +331,8 @@ private fun Step4Resolution(
     WizardScaffold(
         title        = "Resolution",
         onBack       = onBack,
-        primaryLabel = "Start Export",
+        primaryLabel = "Continue",
         onPrimary    = onStart,
-        primaryColor = Color(0xFF00CC66),
     ) {
         Spacer(Modifier.height(8.dp))
         ExportResolution.entries.forEach { res ->
@@ -331,7 +349,197 @@ private fun Step4Resolution(
 }
 
 @Composable
-private fun Step5Progress(
+private fun Step5Kaleido(
+    kaleidoSettings: KaleidoSettings,
+    onUpdate: (KaleidoSettings) -> Unit,
+    onBack: () -> Unit,
+    onStart: () -> Unit,
+) {
+    val initialSettings = remember { kaleidoSettings }
+    var overrideExpanded by rememberSaveable { mutableStateOf(false) }
+
+    WizardScaffold(
+        title        = "Kaleido settings",
+        onBack       = onBack,
+        primaryLabel = "Start Export",
+        onPrimary    = onStart,
+        primaryColor = Color(0xFF00CC66),
+    ) {
+        Spacer(Modifier.height(8.dp))
+        KaleidoSummaryCard(kaleidoSettings)
+        Spacer(Modifier.height(16.dp))
+
+        if (!overrideExpanded) {
+            Text(
+                "Defaults match your current screen settings.",
+                color = DimWhite,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { overrideExpanded = true }) {
+                Text("Override for this export", color = NeonCyan)
+            }
+        } else {
+            Text(
+                "Adjusting for this export only:",
+                color = DimWhite,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            ExportKaleidoOverrideContent(
+                settings = kaleidoSettings,
+                onUpdate = onUpdate,
+            )
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = {
+                onUpdate(initialSettings)
+                overrideExpanded = false
+            }) {
+                Text("Cancel override", color = DimWhite)
+            }
+        }
+    }
+}
+
+@Composable
+private fun KaleidoSummaryCard(settings: KaleidoSettings) {
+    val orientationSuffix = when {
+        settings.foldCount == 4 && settings.squareRotationLocked -> " (Square)"
+        settings.foldCount == 4 -> " (Diamond)"
+        else -> ""
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF222230))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SummaryRow("Fold count", "${settings.foldCount}$orientationSuffix")
+        SummaryRow("Frame shape", settings.frameShape.name)
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Frame color", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+            ) {
+                Checkerboard(Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Color(settings.frameColorArgb.toInt())))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "#%08X".format(settings.frameColorArgb),
+                color      = DimWhite,
+                fontSize   = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String) {
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, color = Color.White,  fontSize = 14.sp)
+        Text(value, color = DimWhite, fontSize = 14.sp)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExportKaleidoOverrideContent(
+    settings: KaleidoSettings,
+    onUpdate: (KaleidoSettings) -> Unit,
+) {
+    var showColorPicker by rememberSaveable { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("Fold count: ${settings.foldCount}", color = Color.White, fontSize = 14.sp)
+        Slider(
+            value         = settings.foldCount.toFloat(),
+            onValueChange = { onUpdate(settings.copy(foldCount = it.toInt())) },
+            valueRange    = 2f..24f,
+            steps         = 21,
+        )
+
+        if (settings.foldCount == 4) {
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !settings.squareRotationLocked,
+                    onClick  = { onUpdate(settings.copy(squareRotationLocked = false)) },
+                    label    = { Text("Diamond") },
+                )
+                FilterChip(
+                    selected = settings.squareRotationLocked,
+                    onClick  = { onUpdate(settings.copy(squareRotationLocked = true)) },
+                    label    = { Text("Square") },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text("Frame shape", color = Color.White, fontSize = 14.sp)
+        Spacer(Modifier.height(4.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(FrameShape.entries) { shape ->
+                FilterChip(
+                    selected = settings.frameShape == shape,
+                    onClick  = { onUpdate(settings.copy(frameShape = shape)) },
+                    label    = { Text(shape.name) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text("Frame color", color = Color.White, fontSize = 14.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(8.dp))
+                    .clickable { showColorPicker = true },
+            ) {
+                Checkerboard(Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(Color(settings.frameColorArgb.toInt())))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(
+                    "#%08X".format(settings.frameColorArgb),
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text("Tap to change", color = DimWhite, fontSize = 12.sp)
+            }
+        }
+
+        if (showColorPicker) {
+            FrameColorPickerDialog(
+                initialColorArgb = settings.frameColorArgb,
+                onDismiss        = { showColorPicker = false },
+                onConfirm        = { newArgb ->
+                    onUpdate(settings.copy(frameColorArgb = newArgb))
+                    showColorPicker = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun Step6Progress(
     progress: Float,
     phase: String,
     etaMs: Long,

@@ -41,6 +41,10 @@ class Mp4Exporter(
     private val beatResponseEnabled: Boolean = true,
     private val outputFile: File? = null,
     private val outputFd: FileDescriptor? = null,
+    private val kaleidoFoldCount: Int = 12,
+    private val kaleidoSquareRotationLocked: Boolean = false,
+    private val kaleidoFrameShape: FrameShape = FrameShape.Circle,
+    private val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -162,7 +166,11 @@ class Mp4Exporter(
         renderer.ribbonColor[1] = modeCfg.rg
         renderer.ribbonColor[2] = modeCfg.rb
         renderer.beatThreshold  = modeCfg.beatThreshold
-        renderer.userSkinFilePath = if (exportMode is Mode.UserSlot) userSkinFilePath else null
+        renderer.userSkinFilePath        = if (exportMode is Mode.UserSlot) userSkinFilePath else null
+        renderer.foldCount               = kaleidoFoldCount
+        renderer.squareRotationLocked    = kaleidoSquareRotationLocked
+        renderer.frameShape              = kaleidoFrameShape
+        renderer.frameColorArgb          = kaleidoFrameColorArgb
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

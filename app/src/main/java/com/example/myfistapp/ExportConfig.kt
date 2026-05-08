@@ -5,6 +5,10 @@ data class ExportConfig(
     val audioSource: AudioSource,
     val beatResponseEnabled: Boolean,
     val resolution: ExportResolution,
+    val kaleidoFoldCount: Int = 12,
+    val kaleidoSquareRotationLocked: Boolean = false,
+    val kaleidoFrameShape: FrameShape = FrameShape.Circle,
+    val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
 )
 
 sealed class AudioSource {
