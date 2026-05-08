@@ -90,6 +90,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var kaleidoTex  = 0
     private var kaleidoTexW = 0
     private var kaleidoTexH = 0
+    private var shapeFbo         = 0
+    private var shapeColorTex    = 0
+    private var shapeDepthBuffer = 0
+    private var shapeFboW        = 0
+    private var shapeFboH        = 0
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -154,6 +159,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         ribbonFboA = 0; ribbonTexA = 0
         ribbonFboB = 0; ribbonTexB = 0
         kaleidoFBO = 0; kaleidoTex = 0; kaleidoTexW = 0; kaleidoTexH = 0
+        shapeFbo = 0; shapeColorTex = 0; shapeDepthBuffer = 0; shapeFboW = 0; shapeFboH = 0
         ribbonReadIsA    = true
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -373,6 +379,52 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         if (kaleidoTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(kaleidoTex), 0); kaleidoTex = 0 }
         if (kaleidoFBO != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(kaleidoFBO), 0); kaleidoFBO = 0 }
         kaleidoTexW = 0; kaleidoTexH = 0
+    }
+
+    private fun createShapeFBO(w: Int, h: Int) {
+        val tex = IntArray(1)
+        GLES30.glGenTextures(1, tex, 0)
+        shapeColorTex = tex[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shapeColorTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+        val rb = IntArray(1)
+        GLES30.glGenRenderbuffers(1, rb, 0)
+        shapeDepthBuffer = rb[0]
+        GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, shapeDepthBuffer)
+        GLES30.glRenderbufferStorage(GLES30.GL_RENDERBUFFER, GLES30.GL_DEPTH_COMPONENT16, w, h)
+        GLES30.glBindRenderbuffer(GLES30.GL_RENDERBUFFER, 0)
+
+        val fbo = IntArray(1)
+        GLES30.glGenFramebuffers(1, fbo, 0)
+        shapeFbo = fbo[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, shapeFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, shapeColorTex, 0)
+        GLES30.glFramebufferRenderbuffer(GLES30.GL_FRAMEBUFFER, GLES30.GL_DEPTH_ATTACHMENT,
+            GLES30.GL_RENDERBUFFER, shapeDepthBuffer)
+
+        val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+        if (status != GLES30.GL_FRAMEBUFFER_COMPLETE)
+            Log.e(TAG, "shapeFbo incomplete: 0x${status.toString(16)}")
+        else
+            Log.d(TAG, "shapeFbo created: ${w}x${h} fbo=$shapeFbo tex=$shapeColorTex")
+
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        shapeFboW = w; shapeFboH = h
+    }
+
+    private fun destroyShapeFBO() {
+        if (shapeColorTex    != 0) { GLES30.glDeleteTextures(1,      intArrayOf(shapeColorTex),    0); shapeColorTex    = 0 }
+        if (shapeDepthBuffer != 0) { GLES30.glDeleteRenderbuffers(1, intArrayOf(shapeDepthBuffer), 0); shapeDepthBuffer = 0 }
+        if (shapeFbo         != 0) { GLES30.glDeleteFramebuffers(1,  intArrayOf(shapeFbo),         0); shapeFbo         = 0 }
+        shapeFboW = 0; shapeFboH = 0
     }
 
     private fun destroyRibbonFBOs() {
@@ -687,9 +739,14 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
 
-        // ── Pass 2: Cylinder — sample painter texture, draw 3D mesh ──────────
+        // ── Pass 2: Shape — render 3D mesh into shapeFbo (kaleido reads this) ──
+        if (shapeFbo == 0 || shapeFboW != surfaceWidth || shapeFboH != surfaceHeight) {
+            destroyShapeFBO()
+            createShapeFBO(surfaceWidth, surfaceHeight)
+        }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, shapeFbo)
         GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
-        GLES30.glClearColor(0.12f, 0.12f, 0.12f, 1f)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glEnable(GLES30.GL_CULL_FACE)
         GLES30.glCullFace(GLES30.GL_BACK)
@@ -742,13 +799,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
             GLES30.glDisable(GLES30.GL_BLEND)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shapeColorTex)
             kProg.use()
             kProg.setInt("u_content", 0)
             kProg.setVec2("u_resolution", wW, wH)
             kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
-            kProg.setFloat("u_cyclone_angle", shapeAngleRad)
-            kProg.setVec2("u_shake", shakeX, shakeY)
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
             val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
             kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
@@ -845,6 +900,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         userSkinTextureCache.clear()
 
         destroyKaleidoFBO()
+        destroyShapeFBO()
         destroyRibbonFBOs()
         destroyFBO()
 

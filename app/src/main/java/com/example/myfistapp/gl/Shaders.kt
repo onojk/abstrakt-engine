@@ -287,7 +287,9 @@ internal object Shaders {
         }
     """.trimIndent()
 
-    // CYCLONE_KALEIDO_FRAG — White frame + 5% more zoomed kaleidoscope
+    // CYCLONE_KALEIDO_FRAG — folds the rendered shape FBO into a kaleidoscope.
+    // u_content is the shape FBO (screen-resolution 3D render), not the painter strip.
+    // Rotation of the shape is already baked into the FBO; no UV-scroll math needed.
     val CYCLONE_KALEIDO_FRAG = """
         #version 300 es
         precision highp float;
@@ -297,8 +299,6 @@ internal object Shaders {
         uniform sampler2D u_content;
         uniform vec2      u_resolution;
         uniform float     u_kaleido_rotation;
-        uniform float     u_cyclone_angle;
-        uniform vec2      u_shake;
         uniform float     u_kaleido_folds;
         uniform float     u_kaleido_rotation_offset;
 
@@ -312,26 +312,19 @@ internal object Shaders {
             float r     = length(centered);
             float theta = atan(centered.y, centered.x) + u_kaleido_rotation + u_kaleido_rotation_offset;
 
+            // Fold into one kaleido sector.
             float segAngle = 2.0 * PI / u_kaleido_folds;
             theta = mod(theta, segAngle);
             if (theta > segAngle * 0.5) theta = segAngle - theta;
 
-            // Kaleidoscope sampling (big coverage)
-            float frontU = mod(u_cyclone_angle / (2.0 * PI), 1.0);
-            float thetaU = (theta / (2.0 * PI)) * 2.0;
-            float radial = r * 1.9;
+            // Reconstruct folded point in the same normalised screen space,
+            // then map back to UV [0,1] to sample the shape FBO.
+            // Inverse of: centered = (v_uv * res - res*0.5) / minDim
+            //         =>  v_uv = centered * minDim / res + 0.5
+            vec2 folded   = vec2(cos(theta) * r, sin(theta) * r);
+            vec2 sampleUV = folded * minDim / u_resolution + 0.5;
 
-            // Beat shake: offset sampling UV in lockstep with cylinder translate.
-            // Applied after the fold so 12-fold symmetry is preserved.
-            vec2 shakeOff = u_shake / 12.0;
-
-            vec2 sampleUV = vec2(
-                fract(frontU + thetaU + shakeOff.x),
-                clamp(radial + shakeOff.y, 0.0, 1.0)
-            );
-
-            vec4 kaleido = texture(u_content, sampleUV);
-            fragColor = kaleido;
+            fragColor = texture(u_content, sampleUV);
         }
     """.trimIndent()
 
