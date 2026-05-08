@@ -44,6 +44,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -72,12 +74,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -238,6 +243,9 @@ private fun VisualizerScreen() {
     }
     LaunchedEffect(kaleidoSettings.frameShape) {
         glView.setFrameShape(kaleidoSettings.frameShape)
+    }
+    LaunchedEffect(kaleidoSettings.frameColorArgb) {
+        glView.setFrameColorArgb(kaleidoSettings.frameColorArgb)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -896,6 +904,7 @@ private fun VisualizerScreen() {
                 onFoldCountChange            = { kaleidoVm.setFoldCount(it) },
                 onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
                 onFrameShapeChange           = { kaleidoVm.setFrameShape(it) },
+                onFrameColorChange           = { kaleidoVm.setFrameColorArgb(it) },
             )
         }
     }
@@ -1066,7 +1075,9 @@ private fun KaleidoSettingsContent(
     onFoldCountChange: (Int) -> Unit,
     onSquareRotationLockedChange: (Boolean) -> Unit,
     onFrameShapeChange: (FrameShape) -> Unit,
+    onFrameColorChange: (Long) -> Unit,
 ) {
+    var showColorPicker by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .padding(horizontal = 24.dp, vertical = 8.dp)
@@ -1158,6 +1169,50 @@ private fun KaleidoSettingsContent(
                     } else null,
                 )
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Frame color", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Spacer(Modifier.height(8.dp))
+
+        val currentColor = Color(settings.frameColorArgb.toInt())
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(currentColor)
+                    .border(2.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                    .clickable { showColorPicker = true },
+            )
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text(
+                    text       = "#%08X".format(settings.frameColorArgb),
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                )
+                Text(
+                    text  = "Tap to change",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DimWhite,
+                )
+            }
+        }
+
+        if (showColorPicker) {
+            FrameColorPickerDialog(
+                initialColor = currentColor,
+                onDismiss    = { showColorPicker = false },
+                onConfirm    = { newColor ->
+                    onFrameColorChange(newColor.toArgb().toLong() and 0xFFFFFFFFL)
+                    showColorPicker = false
+                },
+            )
         }
 
         Spacer(Modifier.height(32.dp))

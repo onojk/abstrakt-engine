@@ -79,6 +79,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     @Volatile var foldCount             = 12
     @Volatile var squareRotationLocked  = false
     @Volatile var frameShape: FrameShape = FrameShape.Circle
+    @Volatile var frameColorArgb: Long   = 0xFFFFFFFFL
     private var frameOverlayProgram: ShaderProgram? = null
     private var kaleidoFBO  = 0
     private var kaleidoTex  = 0
@@ -742,8 +743,13 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 foProg.use()
                 foProg.setInt("u_kaleido_tex", 0)
                 foProg.setVec2("u_resolution", wW, wH)
+                val argb = frameColorArgb
+                val fA = ((argb shr 24) and 0xFFL).toFloat() / 255f
+                val fR = ((argb shr 16) and 0xFFL).toFloat() / 255f
+                val fG = ((argb shr  8) and 0xFFL).toFloat() / 255f
+                val fB = (argb           and 0xFFL).toFloat() / 255f
                 foProg.setInt("u_frame_shape", frameShape.ordinal)
-                foProg.setVec4("u_frame_color", 1f, 1f, 1f, 1f)
+                foProg.setVec4("u_frame_color", fR, fG, fB, fA)
                 foProg.setFloat("u_frame_size", 0.52f)
                 drawQuad()
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)

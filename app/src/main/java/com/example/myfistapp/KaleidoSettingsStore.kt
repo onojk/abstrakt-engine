@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +19,7 @@ object KaleidoKeys {
     val FOLD_COUNT        = intPreferencesKey("fold_count")
     val SQUARE_ROT_LOCKED = booleanPreferencesKey("square_rot_locked")
     val FRAME_SHAPE       = stringPreferencesKey("frame_shape")
+    val FRAME_COLOR_ARGB  = longPreferencesKey("frame_color_argb")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -29,6 +31,7 @@ class KaleidoSettingsStore(private val context: Context) {
             frameShape           = prefs[KaleidoKeys.FRAME_SHAPE]
                 ?.let { runCatching { FrameShape.valueOf(it) }.getOrNull() }
                 ?: FrameShape.Circle,
+            frameColorArgb       = prefs[KaleidoKeys.FRAME_COLOR_ARGB] ?: 0xFFFFFFFFL,
         )
     }
 
@@ -47,6 +50,12 @@ class KaleidoSettingsStore(private val context: Context) {
     suspend fun setFrameShape(value: FrameShape) {
         context.kaleidoDataStore.edit { prefs ->
             prefs[KaleidoKeys.FRAME_SHAPE] = value.name
+        }
+    }
+
+    suspend fun setFrameColorArgb(value: Long) {
+        context.kaleidoDataStore.edit { prefs ->
+            prefs[KaleidoKeys.FRAME_COLOR_ARGB] = value
         }
     }
 }

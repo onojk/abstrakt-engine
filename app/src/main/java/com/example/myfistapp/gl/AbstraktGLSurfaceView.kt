@@ -27,6 +27,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setFoldCount(count: Int)              { renderer.foldCount = count }
     fun setSquareRotationLocked(value: Boolean) { renderer.squareRotationLocked = value }
     fun setFrameShape(value: FrameShape)         { renderer.frameShape = value }
+    fun setFrameColorArgb(value: Long)           { renderer.frameColorArgb = value }
     fun setRibbonColor(r: Float, g: Float, b: Float) {
         renderer.ribbonColor[0] = r
         renderer.ribbonColor[1] = g

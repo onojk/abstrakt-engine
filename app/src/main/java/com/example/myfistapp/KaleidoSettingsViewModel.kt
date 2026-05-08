@@ -34,4 +34,8 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setFrameShape(value: FrameShape) {
         viewModelScope.launch { store.setFrameShape(value) }
     }
+
+    fun setFrameColorArgb(value: Long) {
+        viewModelScope.launch { store.setFrameColorArgb(value) }
+    }
 }
