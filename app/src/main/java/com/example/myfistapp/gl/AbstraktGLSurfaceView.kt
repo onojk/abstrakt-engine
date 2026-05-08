@@ -58,5 +58,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setRendererReadyCallback(cb: () -> Unit) { renderer.onReadyCallback = cb }
     fun setLiveSnapshot(snap: AudioSnapshot?)    { renderer.audioUniforms.liveSnapshot = snap }
     fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
-    fun toggleShape()                            { renderer.toggleShape() }
+    fun cycleShape()                             { renderer.cycleShape() }
 }

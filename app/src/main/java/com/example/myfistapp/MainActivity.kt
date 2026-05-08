@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -597,6 +598,24 @@ private fun VisualizerScreen() {
                 }
             }
 
+            // Shape cycle button (debug — replaced by proper picker in slice 8d)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) { glView.cycleShape() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.ViewInAr,
+                    contentDescription = "Cycle shape",
+                    tint               = NeonCyan,
+                    modifier           = Modifier.size(22.dp),
+                )
+            }
+
             // ⚙ Settings button
             Box(
                 modifier = Modifier
@@ -761,7 +780,6 @@ private fun VisualizerScreen() {
                             }
                             .pointerInput(currentMode) {
                                 detectTapGestures(
-                                    onDoubleTap = { glView.toggleShape() },
                                     onLongPress = {
                                         if (currentMode is Mode.UserSlot) showSlotSheet = true
                                         else glView.triggerPainterStatsDump()
