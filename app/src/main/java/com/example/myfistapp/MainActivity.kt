@@ -491,11 +491,11 @@ private fun VisualizerScreen() {
     val updatedModeIdx = rememberUpdatedState(currentModeIdx)
     val updatedModes   = rememberUpdatedState(modes)
 
-    val titleSuffix = when (val m = currentMode) {
-        Mode.Cyclone    -> "cyclone"
-        is Mode.Builtin -> "skin ${m.skinIndex}"
-        is Mode.UserSlot -> "user ${m.slotIndex + 1}"
-        Mode.AddSlot    -> "add skin"
+    val title = when (val m = currentMode) {
+        Mode.Cyclone     -> "abstrakt"
+        is Mode.Builtin  -> "abstrakt / skin ${m.skinIndex}"
+        is Mode.UserSlot -> "abstrakt / user ${m.slotIndex + 1}"
+        Mode.AddSlot     -> "abstrakt"
     }
 
     // ── Add-skin entry point — checks full, then shows menu ──────────────────
@@ -511,19 +511,136 @@ private fun VisualizerScreen() {
         }
     }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgColor),
+            .background(BgColor)
+            .statusBarsPadding(),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // ── Top control row ────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Mic toggle button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isMicActive) Color(0xFFFF2D78).copy(alpha = 0.20f)
+                        else NeonCyan.copy(alpha = 0.15f)
+                    )
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) { onMicToggle() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isMicActive) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = if (isMicActive) "Stop microphone" else "Use microphone",
+                    tint = if (isMicActive) Color(0xFFFF2D78) else NeonCyan,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+
+            // Export button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) {
+                        exportVm.openWizard(currentMode, audioFile)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // "+" button — Add Skin
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) { onAddSkinTapped() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+
+                DropdownMenu(
+                    expanded         = showAddMenu,
+                    onDismissRequest = { showAddMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text    = { Text("Take Photo") },
+                        onClick = { showAddMenu = false; onTakePhoto() },
+                    )
+                    DropdownMenuItem(
+                        text    = { Text("Pick from Gallery") },
+                        onClick = { showAddMenu = false; onPickGallery() },
+                    )
+                    Box(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
+                            color = DimWhite.copy(alpha = 0.5f),
+                            fontSize = 14.sp,
+                        )
+                    }
+                }
+            }
+
+            // ⚙ Settings button
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .clickable { kaleidoVm.openSheet() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.Settings,
+                    contentDescription = "Visual settings",
+                    tint               = NeonCyan,
+                    modifier           = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        // "● LIVE" pulsing indicator
+        if (isMicActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 12.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Text(
+                    text          = "● LIVE",
+                    color         = Color(0xFFFF2D78).copy(alpha = livePulse.value),
+                    fontSize      = 11.sp,
+                    fontWeight    = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+            }
+        }
+
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 24.dp),
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "abstrakt / $titleSuffix",
+                text = title,
                 color = NeonCyan,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -690,116 +807,6 @@ private fun VisualizerScreen() {
                 }
             }
 
-        }
-
-        // ── Top-right button column: Mic + Export + Add Skin ─────────────────
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(top = 8.dp, end = 12.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Mic toggle button
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isMicActive) Color(0xFFFF2D78).copy(alpha = 0.20f)
-                            else NeonCyan.copy(alpha = 0.15f)
-                        )
-                        .alpha(if (isRendererReady) 1f else 0.3f)
-                        .clickable(enabled = isRendererReady) { onMicToggle() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = if (isMicActive) Icons.Default.MicOff else Icons.Default.Mic,
-                        contentDescription = if (isMicActive) "Stop microphone" else "Use microphone",
-                        tint = if (isMicActive) Color(0xFFFF2D78) else NeonCyan,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-
-                // Export button
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(NeonCyan.copy(alpha = 0.15f))
-                        .alpha(if (isRendererReady) 1f else 0.3f)
-                        .clickable(enabled = isRendererReady) {
-                            exportVm.openWizard(currentMode, audioFile)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                }
-
-                // "+" button — Add Skin
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(NeonCyan.copy(alpha = 0.15f))
-                        .alpha(if (isRendererReady) 1f else 0.3f)
-                        .clickable(enabled = isRendererReady) { onAddSkinTapped() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-                    DropdownMenu(
-                        expanded         = showAddMenu,
-                        onDismissRequest = { showAddMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text    = { Text("Take Photo") },
-                            onClick = { showAddMenu = false; onTakePhoto() },
-                        )
-                        DropdownMenuItem(
-                            text    = { Text("Pick from Gallery") },
-                            onClick = { showAddMenu = false; onPickGallery() },
-                        )
-                        Box(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
-                                color = DimWhite.copy(alpha = 0.5f),
-                                fontSize = 14.sp,
-                            )
-                        }
-                    }
-                }
-
-                // ⚙ Settings button
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(NeonCyan.copy(alpha = 0.15f))
-                        .clickable { kaleidoVm.openSheet() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector        = Icons.Default.Settings,
-                        contentDescription = "Visual settings",
-                        tint               = NeonCyan,
-                        modifier           = Modifier.size(22.dp),
-                    )
-                }
-            }
-
-            // "● LIVE" pulsing indicator shown below buttons while mic is active.
-            if (isMicActive) {
-                Text(
-                    text          = "● LIVE",
-                    color         = Color(0xFFFF2D78).copy(alpha = livePulse.value),
-                    fontSize      = 11.sp,
-                    fontWeight    = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    modifier      = Modifier.padding(top = 3.dp),
-                )
-            }
         }
     }
 
