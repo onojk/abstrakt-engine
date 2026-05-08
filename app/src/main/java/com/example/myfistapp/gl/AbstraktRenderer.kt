@@ -53,11 +53,16 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private val painterPrograms: MutableMap<Painter, ShaderProgram> = mutableMapOf()
     private var vaoId              = 0
     private var vboId              = 0
-    private var cycloneVaoId       = 0
-    private var cycloneVboId       = 0
-    private var cycloneAngleRad    = 0f
+    @Volatile var currentShape: Shape = CylinderShape()
+    private var shapeVao         = 0
+    private var shapePositionVbo = 0
+    private var shapeUvVbo       = 0
+    private var shapeIbo         = 0
+    private var shapeIndexCount  = 0
+    private var shapeMeshLoaded  = false
+    private var loadedShapeName: String? = null
+    private var shapeAngleRad    = 0f
     private var kaleidoRotationRad = 0f
-    private val cylinderVertexCount = CylinderGeometry.VERTEX_COUNT
     private var painterFBO      = 0
     private var painterTexture  = 0
     private var imageTexture    = 0
@@ -120,9 +125,14 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         painterPrograms.clear()
         vaoId              = 0
         vboId              = 0
-        cycloneVaoId       = 0
-        cycloneVboId       = 0
-        cycloneAngleRad    = 0f
+        shapeVao           = 0
+        shapePositionVbo   = 0
+        shapeUvVbo         = 0
+        shapeIbo           = 0
+        shapeIndexCount    = 0
+        shapeMeshLoaded    = false
+        loadedShapeName    = null
+        shapeAngleRad      = 0f
         kaleidoRotationRad = 0f
         painterFBO      = 0
         painterTexture  = 0
@@ -197,40 +207,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glBindVertexArray(0)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
 
-        // ── Cylinder VAO/VBO (Cyclone mode) ──────────────────────────────────
-        val cycVaos = IntArray(1)
-        GLES30.glGenVertexArrays(1, cycVaos, 0)
-        cycloneVaoId = cycVaos[0]
-        GLES30.glBindVertexArray(cycloneVaoId)
-
-        val cycVbos = IntArray(1)
-        GLES30.glGenBuffers(1, cycVbos, 0)
-        cycloneVboId = cycVbos[0]
-        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, cycloneVboId)
-
-        val cylData = CylinderGeometry.vertices
-        val cylBuf  = ByteBuffer
-            .allocateDirect(cylData.size * Float.SIZE_BYTES)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-        cylBuf.put(cylData).position(0)
-        GLES30.glBufferData(
-            GLES30.GL_ARRAY_BUFFER,
-            cylData.size * Float.SIZE_BYTES,
-            cylBuf,
-            GLES30.GL_STATIC_DRAW,
-        )
-
-        val stride = CylinderGeometry.STRIDE_BYTES
-        // a_position: location 0, vec3, offset 0
-        GLES30.glEnableVertexAttribArray(0)
-        GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride, 0)
-        // a_uv: location 1, vec2, offset 12 bytes (3 floats)
-        GLES30.glEnableVertexAttribArray(1)
-        GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, stride, 12)
-
-        GLES30.glBindVertexArray(0)
-        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+        // ── Shape mesh upload (Cyclone mode) ─────────────────────────────────
+        loadShapeMeshIfNeeded()
 
         // ── Painter texture + FBO (Cyclone rolling paint) ────────────────────
         val pTexIds = IntArray(1)
@@ -298,7 +276,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         // loadBuiltinSkinTexture() to avoid blocking the first rendered frame.
 
         Log.d(TAG, "onSurfaceCreated complete in ${SystemClock.elapsedRealtime() - scStart}ms — " +
-            "quad vao=$vaoId cyclone vao=$cycloneVaoId " +
+            "quad vao=$vaoId shape vao=$shapeVao shape=${currentShape.name} " +
             "cyclone=${cycloneProgram?.id} painters=${painterPrograms.mapValues { it.value.id }}")
     }
 
@@ -548,10 +526,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val rProg = ribbonProgram
         val bProg = blitProgram
 
-        // Advance rotation: 2π radians per 30 seconds. Keep in [0, 2π) so
-        // the mediump-precision shader receives a value that never exceeds ~6.3.
+        // Advance rotation. Keep angles in [0, 2π) so mediump shaders never see
+        // large values where float ULP exceeds one frame's increment.
         val twoPi = (2.0 * Math.PI).toFloat()
-        cycloneAngleRad    = (cycloneAngleRad + dt * (twoPi / 30f)).rem(twoPi)
+        shapeAngleRad      = (shapeAngleRad + dt * currentShape.rotationSpeedRadPerSec()).rem(twoPi)
         kaleidoRotationRad = (kaleidoRotationRad + dt * 0.05f).rem(twoPi)
 
         // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
@@ -616,7 +594,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
 
         // ── Pass 1: Painter — write a hue stripe at the rear angle ────────────
         // Rear is 270° past front (front = α+π/2, rear = α+3π/2).
-        val rearU = ((cycloneAngleRad + 3.0 * Math.PI / 2.0)
+        val rearU = ((shapeAngleRad + 3.0 * Math.PI / 2.0)
             .mod(2.0 * Math.PI) / (2.0 * Math.PI)).toFloat()
         val rearX = (rearU * PAINTER_TEX_W).toInt().coerceIn(0, PAINTER_TEX_W - 1)
         val endX  = rearX + PAINTER_STRIPE_W
@@ -634,7 +612,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
         pProg.setFloat("u_beat_decay", beatDecay)
         pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
-        pProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+        pProg.setFloat("u_cyclone_angle", shapeAngleRad)
         pProg.setFloatArray("u_bands", snap.bands)
         // IMAGE painter: bind source image to unit 1.
         if (audioUniforms.activePainter == Painter.IMAGE && imageTexture != 0) {
@@ -714,10 +692,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val vpM    = FloatArray(16)
         val mvpM   = FloatArray(16)
 
+        val rotAxis = currentShape.rotationAxis()
         Matrix.setIdentityM(modelM, 0)
         Matrix.translateM(modelM, 0, shakeX, shakeY, 0f)
         Matrix.rotateM(modelM, 0,
-            Math.toDegrees(cycloneAngleRad.toDouble()).toFloat(), 0f, 1f, 0f)
+            Math.toDegrees(shapeAngleRad.toDouble()).toFloat(),
+            rotAxis[0], rotAxis[1], rotAxis[2])
         Matrix.setLookAtM(viewM, 0,
             0f, 0f, 3f, 0f, 0f, 0f, 0f, 1f, 0f)
         Matrix.perspectiveM(projM, 0, 45f, wW / wH, 0.1f, 100f)
@@ -731,8 +711,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         cProg.setMat4("u_mvp", mvpM)
         cProg.setInt("u_painterTexture", 0)
 
-        GLES30.glBindVertexArray(cycloneVaoId)
-        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, cylinderVertexCount)
+        loadShapeMeshIfNeeded()
+        GLES30.glBindVertexArray(shapeVao)
+        GLES30.glDrawElements(GLES30.GL_TRIANGLES, shapeIndexCount, GLES30.GL_UNSIGNED_SHORT, 0)
         GLES30.glBindVertexArray(0)
 
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
@@ -757,7 +738,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setInt("u_content", 0)
             kProg.setVec2("u_resolution", wW, wH)
             kProg.setFloat("u_kaleido_rotation", kaleidoRotationRad)
-            kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
+            kProg.setFloat("u_cyclone_angle", shapeAngleRad)
             kProg.setVec2("u_shake", shakeX, shakeY)
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
             val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
@@ -795,7 +776,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     // Resets per-session animation state after a procedural warmup, preserving the painter
     // FBO content (that's the whole point of warmup) and lastStampedMode.
     fun resetAnimationState() {
-        cycloneAngleRad    = 0f
+        shapeAngleRad      = 0f
         kaleidoRotationRad = 0f
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -831,10 +812,13 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         blitProgram?.delete();         blitProgram         = null
         frameOverlayProgram?.delete(); frameOverlayProgram = null
 
-        if (vaoId        != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),        0); vaoId        = 0 }
-        if (vboId        != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),        0); vboId        = 0 }
-        if (cycloneVaoId != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(cycloneVaoId), 0); cycloneVaoId = 0 }
-        if (cycloneVboId != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(cycloneVboId), 0); cycloneVboId = 0 }
+        if (vaoId            != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),            0); vaoId            = 0 }
+        if (vboId            != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),            0); vboId            = 0 }
+        if (shapeVao         != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(shapeVao),         0); shapeVao         = 0 }
+        if (shapePositionVbo != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapePositionVbo), 0); shapePositionVbo = 0 }
+        if (shapeUvVbo       != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapeUvVbo),       0); shapeUvVbo       = 0 }
+        if (shapeIbo         != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapeIbo),         0); shapeIbo         = 0 }
+        shapeMeshLoaded = false; loadedShapeName = null
 
         if (painterFBO     != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(painterFBO),     0); painterFBO     = 0 }
         if (painterTexture != 0) { GLES30.glDeleteTextures(1,     intArrayOf(painterTexture), 0); painterTexture = 0 }
@@ -879,6 +863,68 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         }
         Log.d(TAG, "Painter stats: avg=(${sumR/totalPixels},${sumG/totalPixels},${sumB/totalPixels}) " +
             "nonzero=${nonzeroPixels}/${totalPixels} (${(nonzeroPixels * 100.0 / totalPixels).toInt()}%)")
+    }
+
+    private fun loadShapeMeshIfNeeded() {
+        if (shapeMeshLoaded && loadedShapeName == currentShape.name) return
+
+        if (shapeVao         != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(shapeVao),         0); shapeVao         = 0 }
+        if (shapePositionVbo != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapePositionVbo), 0); shapePositionVbo = 0 }
+        if (shapeUvVbo       != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapeUvVbo),       0); shapeUvVbo       = 0 }
+        if (shapeIbo         != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(shapeIbo),         0); shapeIbo         = 0 }
+
+        val mesh = currentShape.buildMesh()
+
+        val posVbos = IntArray(1)
+        GLES30.glGenBuffers(1, posVbos, 0)
+        shapePositionVbo = posVbos[0]
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, shapePositionVbo)
+        val posBuf = ByteBuffer.allocateDirect(mesh.positions.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        posBuf.put(mesh.positions).position(0)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, mesh.positions.size * Float.SIZE_BYTES, posBuf, GLES30.GL_STATIC_DRAW)
+
+        val uvVbos = IntArray(1)
+        GLES30.glGenBuffers(1, uvVbos, 0)
+        shapeUvVbo = uvVbos[0]
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, shapeUvVbo)
+        val uvBuf = ByteBuffer.allocateDirect(mesh.uvs.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        uvBuf.put(mesh.uvs).position(0)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, mesh.uvs.size * Float.SIZE_BYTES, uvBuf, GLES30.GL_STATIC_DRAW)
+
+        val ibos = IntArray(1)
+        GLES30.glGenBuffers(1, ibos, 0)
+        shapeIbo = ibos[0]
+        GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, shapeIbo)
+        val idxBuf = ByteBuffer.allocateDirect(mesh.indices.size * Short.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder()).asShortBuffer()
+        idxBuf.put(mesh.indices).position(0)
+        GLES30.glBufferData(GLES30.GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size * Short.SIZE_BYTES, idxBuf, GLES30.GL_STATIC_DRAW)
+
+        val vaos = IntArray(1)
+        GLES30.glGenVertexArrays(1, vaos, 0)
+        shapeVao = vaos[0]
+        GLES30.glBindVertexArray(shapeVao)
+
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, shapePositionVbo)
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 0, 0)
+
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, shapeUvVbo)
+        GLES30.glEnableVertexAttribArray(1)
+        GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 0, 0)
+
+        GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, shapeIbo)
+
+        GLES30.glBindVertexArray(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+        GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, 0)
+
+        shapeIndexCount = mesh.indices.size
+        shapeMeshLoaded = true
+        loadedShapeName = currentShape.name
+        Log.d(TAG, "Shape mesh loaded: ${currentShape.name} vertices=${mesh.positions.size / 3} indices=$shapeIndexCount")
     }
 
     private fun drawQuad() {
