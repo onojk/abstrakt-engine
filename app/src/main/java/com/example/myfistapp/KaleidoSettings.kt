@@ -15,6 +15,7 @@ data class KaleidoSettings(
     val frameColorArgb: Long = 0xFFFFFFFFL,
     val zoomMultiplier: Float = 1.0f,
     val shapeKind: ShapeKind = ShapeKind.Cylinder,
+    val invertColors: Boolean = false,
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

@@ -100,6 +100,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var shapeFboW        = 0
     private var shapeFboH        = 0
     @Volatile var zoomMultiplier  = 1.0f
+    @Volatile var invertColors    = false
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -783,6 +784,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         cProg.use()
         cProg.setMat4("u_mvp", mvpM)
         cProg.setInt("u_painterTexture", 0)
+        cProg.setInt("u_invert_colors", if (invertColors) 1 else 0)
 
         loadShapeMeshIfNeeded()
         GLES30.glBindVertexArray(shapeVao)

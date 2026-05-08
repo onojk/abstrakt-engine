@@ -54,6 +54,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -418,6 +419,7 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
     ) {
         SummaryRow("Shape", settings.shapeKind.name)
         SummaryRow("Fold count", "${settings.foldCount}$orientationSuffix")
+        SummaryRow("Invert colors", if (settings.invertColors) "On" else "Off")
         SummaryRow("Frame shape", settings.frameShape.name)
         Row(
             modifier          = Modifier.fillMaxWidth(),
@@ -547,6 +549,21 @@ private fun ExportKaleidoOverrideContent(
                     onUpdate(settings.copy(frameColorArgb = newArgb))
                     showColorPicker = false
                 },
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(invertColors = !settings.invertColors)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Invert colors", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked         = settings.invertColors,
+                onCheckedChange = { onUpdate(settings.copy(invertColors = it)) },
             )
         }
     }

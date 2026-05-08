@@ -62,6 +62,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -266,6 +267,9 @@ private fun VisualizerScreen() {
     }
     LaunchedEffect(kaleidoSettings.shapeKind) {
         glView.setShapeKind(kaleidoSettings.shapeKind)
+    }
+    LaunchedEffect(kaleidoSettings.invertColors) {
+        glView.setInvertColors(kaleidoSettings.invertColors)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -1043,6 +1047,7 @@ private fun VisualizerScreen() {
             KaleidoSettingsContent(
                 settings                     = kaleidoSettings,
                 onShapeKindChange            = { kaleidoVm.setShapeKind(it) },
+                onInvertColorsChange         = { kaleidoVm.setInvertColors(it) },
                 onFoldCountChange            = { kaleidoVm.setFoldCount(it) },
                 onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
                 onFrameShapeChange           = { kaleidoVm.setFrameShape(it) },
@@ -1233,6 +1238,7 @@ private fun GlCanvas(
 private fun KaleidoSettingsContent(
     settings: KaleidoSettings,
     onShapeKindChange: (ShapeKind) -> Unit,
+    onInvertColorsChange: (Boolean) -> Unit,
     onFoldCountChange: (Int) -> Unit,
     onSquareRotationLockedChange: (Boolean) -> Unit,
     onFrameShapeChange: (FrameShape) -> Unit,
@@ -1326,6 +1332,32 @@ private fun KaleidoSettingsContent(
                 style    = MaterialTheme.typography.bodySmall,
                 color    = DimWhite,
                 modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onInvertColorsChange(!settings.invertColors) }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Invert colors",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                )
+                Text(
+                    "Flip RGB on painter texture (white↔black, hues inverted)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.invertColors,
+                onCheckedChange = { onInvertColorsChange(it) },
             )
         }
 

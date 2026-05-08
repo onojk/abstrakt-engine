@@ -226,10 +226,13 @@ internal object Shaders {
         #version 300 es
         precision mediump float;
         uniform sampler2D u_painterTexture;
+        uniform int u_invert_colors;
         in  vec2 v_uv;
         out vec4 fragColor;
         void main() {
-            fragColor = texture(u_painterTexture, v_uv);
+            vec4 c = texture(u_painterTexture, v_uv);
+            if (u_invert_colors == 1) c.rgb = vec3(1.0) - c.rgb;
+            fragColor = c;
         }
     """.trimIndent()
 

@@ -61,6 +61,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setLiveSnapshot(snap: AudioSnapshot?)    { renderer.audioUniforms.liveSnapshot = snap }
     fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
     fun setShapeKind(kind: ShapeKind)            { queueEvent { renderer.setShapeKind(kind) } }
+    fun setInvertColors(value: Boolean)          { queueEvent { renderer.invertColors = value } }
     fun setZoomMultiplier(value: Float)          { queueEvent { renderer.zoomMultiplier = value } }
     val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
 }

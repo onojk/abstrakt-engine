@@ -23,6 +23,7 @@ object KaleidoKeys {
     val FRAME_COLOR_ARGB  = longPreferencesKey("frame_color_argb")
     val ZOOM_MULTIPLIER   = floatPreferencesKey("zoom_multiplier")
     val SHAPE_KIND        = stringPreferencesKey("shape_kind")
+    val INVERT_COLORS     = booleanPreferencesKey("invert_colors")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -39,6 +40,7 @@ class KaleidoSettingsStore(private val context: Context) {
             shapeKind            = prefs[KaleidoKeys.SHAPE_KIND]
                 ?.let { runCatching { ShapeKind.valueOf(it) }.getOrNull() }
                 ?: ShapeKind.Cylinder,
+            invertColors         = prefs[KaleidoKeys.INVERT_COLORS] ?: false,
         )
     }
 
@@ -75,6 +77,12 @@ class KaleidoSettingsStore(private val context: Context) {
     suspend fun setShapeKind(value: ShapeKind) {
         context.kaleidoDataStore.edit { prefs ->
             prefs[KaleidoKeys.SHAPE_KIND] = value.name
+        }
+    }
+
+    suspend fun setInvertColors(value: Boolean) {
+        context.kaleidoDataStore.edit { prefs ->
+            prefs[KaleidoKeys.INVERT_COLORS] = value
         }
     }
 }

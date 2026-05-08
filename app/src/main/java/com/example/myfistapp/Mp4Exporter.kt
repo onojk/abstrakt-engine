@@ -47,6 +47,7 @@ class Mp4Exporter(
     private val kaleidoFrameShape: FrameShape = FrameShape.Circle,
     private val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
     private val kaleidoShapeKind: ShapeKind = ShapeKind.Cylinder,
+    private val invertColors: Boolean = false,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -174,6 +175,7 @@ class Mp4Exporter(
         renderer.frameShape              = kaleidoFrameShape
         renderer.frameColorArgb          = kaleidoFrameColorArgb
         renderer.setShapeKind(kaleidoShapeKind)
+        renderer.invertColors = invertColors
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

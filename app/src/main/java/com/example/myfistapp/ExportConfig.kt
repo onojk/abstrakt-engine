@@ -10,6 +10,7 @@ data class ExportConfig(
     val kaleidoFrameShape: FrameShape = FrameShape.Circle,
     val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
     val kaleidoShapeKind: ShapeKind = ShapeKind.Cylinder,
+    val invertColors: Boolean = false,
 )
 
 sealed class AudioSource {

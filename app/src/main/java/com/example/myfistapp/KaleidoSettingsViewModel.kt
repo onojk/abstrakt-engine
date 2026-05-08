@@ -50,4 +50,8 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setShapeKind(value: ShapeKind) {
         viewModelScope.launch { store.setShapeKind(value) }
     }
+
+    fun setInvertColors(value: Boolean) {
+        viewModelScope.launch { store.setInvertColors(value) }
+    }
 }

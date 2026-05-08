@@ -206,6 +206,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     kaleidoFrameShape            = kaleido.frameShape,
                     kaleidoFrameColorArgb        = kaleido.frameColorArgb,
                     kaleidoShapeKind             = kaleido.shapeKind,
+                    invertColors                 = kaleido.invertColors,
                 )
                 val result = exporter.export { fraction, phase ->
                     _progressValue.value = fraction
