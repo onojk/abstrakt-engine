@@ -74,8 +74,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     // Per-mode skin textures (indices 0-4 = skin1..skin5).
     private val skinTextures    = IntArray(5)
     // Per-mode parameters — written from UI thread, read on GL thread.
-    @Volatile var kaleidoFolds   = 12f
-    @Volatile var foldCount      = 12
+    @Volatile var kaleidoFolds          = 12f
+    @Volatile var foldCount             = 12
+    @Volatile var squareRotationLocked  = false
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -680,6 +681,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setFloat("u_cyclone_angle", cycloneAngleRad)
             kProg.setVec2("u_shake", shakeX, shakeY)
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
+            val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
+            kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
             drawQuad()
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             GLES30.glDisable(GLES30.GL_BLEND)

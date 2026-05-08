@@ -26,4 +26,8 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setFoldCount(value: Int) {
         viewModelScope.launch { store.setFoldCount(value) }
     }
+
+    fun setSquareRotationLocked(value: Boolean) {
+        viewModelScope.launch { store.setSquareRotationLocked(value) }
+    }
 }

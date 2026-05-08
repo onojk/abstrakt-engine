@@ -300,6 +300,7 @@ internal object Shaders {
         uniform float     u_cyclone_angle;
         uniform vec2      u_shake;
         uniform float     u_kaleido_folds;
+        uniform float     u_kaleido_rotation_offset;
 
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -309,7 +310,7 @@ internal object Shaders {
             vec2  centered = (v_uv * u_resolution - u_resolution * 0.5) / minDim;
 
             float r     = length(centered);
-            float theta = atan(centered.y, centered.x) + u_kaleido_rotation;
+            float theta = atan(centered.y, centered.x) + u_kaleido_rotation + u_kaleido_rotation_offset;
 
             float segAngle = 2.0 * PI / u_kaleido_folds;
             theta = mod(theta, segAngle);

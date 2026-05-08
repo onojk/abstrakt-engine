@@ -20,6 +20,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Settings
@@ -54,6 +55,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -226,9 +228,12 @@ private fun VisualizerScreen() {
         }
     }
 
-    // Push global fold count to the GL renderer whenever the setting changes.
+    // Push global fold count and square-rotation lock to the GL renderer whenever they change.
     LaunchedEffect(kaleidoSettings.foldCount) {
         glView.setFoldCount(kaleidoSettings.foldCount)
+    }
+    LaunchedEffect(kaleidoSettings.squareRotationLocked) {
+        glView.setSquareRotationLocked(kaleidoSettings.squareRotationLocked)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -883,8 +888,9 @@ private fun VisualizerScreen() {
             containerColor   = Color(0xFF1A1A24),
         ) {
             KaleidoSettingsContent(
-                settings          = kaleidoSettings,
-                onFoldCountChange = { kaleidoVm.setFoldCount(it) },
+                settings                     = kaleidoSettings,
+                onFoldCountChange            = { kaleidoVm.setFoldCount(it) },
+                onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
             )
         }
     }
@@ -1048,10 +1054,12 @@ private fun GlCanvas(
 
 // ── Kaleido settings sheet content ────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KaleidoSettingsContent(
     settings: KaleidoSettings,
     onFoldCountChange: (Int) -> Unit,
+    onSquareRotationLockedChange: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1073,13 +1081,56 @@ private fun KaleidoSettingsContent(
             value       = settings.foldCount.toFloat(),
             onValueChange = { onFoldCountChange(it.toInt()) },
             valueRange  = 2f..24f,
-            steps       = 21,   // 23 selectable positions: 2, 3, … 24
+            steps       = 21,
         )
         Text(
             text  = foldCountHint(settings.foldCount),
             style = MaterialTheme.typography.bodySmall,
             color = DimWhite,
         )
+
+        if (settings.foldCount == 4) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Orientation",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = !settings.squareRotationLocked,
+                    onClick  = { onSquareRotationLockedChange(false) },
+                    label    = { Text("Diamond") },
+                    leadingIcon = if (!settings.squareRotationLocked) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                    modifier = Modifier.weight(1f),
+                )
+                FilterChip(
+                    selected = settings.squareRotationLocked,
+                    onClick  = { onSquareRotationLockedChange(true) },
+                    label    = { Text("Square") },
+                    leadingIcon = if (settings.squareRotationLocked) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                text = if (settings.squareRotationLocked)
+                    "Pattern aligned to vertical and horizontal axes"
+                else
+                    "Pattern aligned to diagonal axes (default)",
+                style    = MaterialTheme.typography.bodySmall,
+                color    = DimWhite,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
         Spacer(Modifier.height(32.dp))
     }
 }
