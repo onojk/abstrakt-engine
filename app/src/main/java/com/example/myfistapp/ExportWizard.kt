@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -39,12 +40,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,20 +49,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfistapp.audio.AudioFile
-import com.example.myfistapp.audio.loadAndAnalyze
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import java.io.IOException
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 // ── Wizard step tracking ──────────────────────────────────────────────────────
 
-private enum class WizardStep { MODE, AUDIO, BEAT, RESOLUTION, PROGRESS, DONE }
+internal enum class WizardStep { MODE, AUDIO, BEAT, RESOLUTION, PROGRESS, DONE }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -77,182 +68,91 @@ fun ExportWizard(
     currentAudioFile: AudioFile?,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val scope   = rememberCoroutineScope()
+    val vm: ExportViewModel = viewModel()
 
-    // Config state
-    var step               by remember { mutableStateOf(WizardStep.MODE) }
-    var selectedMode       by remember { mutableStateOf(currentMode.takeIf { it != Mode.AddSlot } ?: Mode.Cyclone) }
-    var selectedAudio      by remember { mutableStateOf<AudioSource>(if (currentAudioFile != null) AudioSource.UseCurrent else AudioSource.Silent) }
-    var pickedAudioFile    by remember { mutableStateOf<AudioFile?>(null) }
-    var beatResponse       by remember { mutableStateOf(true) }
-    var selectedRes        by remember { mutableStateOf(ExportResolution.FHD_1080P) }
-
-    // Progress state
-    var progressValue      by remember { mutableFloatStateOf(0f) }
-    var progressPhase      by remember { mutableStateOf("") }
-    var encodeStartMs      by remember { mutableLongStateOf(0L) }
-    var exportedUri        by remember { mutableStateOf<Uri?>(null) }
-    var exportedName       by remember { mutableStateOf("") }
-    var exportedSize       by remember { mutableLongStateOf(0L) }
-
-    // Job + MediaStore URI for cancel cleanup
-    var exportJob          by remember { mutableStateOf<Job?>(null) }
-    var pendingStoreUri    by remember { mutableStateOf<Uri?>(null) }
-    var showCancelDialog   by remember { mutableStateOf(false) }
-    var isLoadingAudio     by remember { mutableStateOf(false) }
-
-    // Track encode phase switch for ETA
-    LaunchedEffect(progressPhase) {
-        if (progressPhase.startsWith("Encoding") && encodeStartMs == 0L) {
-            encodeStartMs = System.currentTimeMillis()
-        }
+    // Initialize wizard state once per open; no-op on recomposition after rotation.
+    LaunchedEffect(Unit) {
+        vm.initializeIfNeeded(currentMode, currentAudioFile)
     }
 
-    // Audio picker for "Pick a different song"
+    // Collect all state from the ViewModel.
+    val step            by vm.step.collectAsStateWithLifecycle()
+    val selectedMode    by vm.selectedMode.collectAsStateWithLifecycle()
+    val selectedAudio   by vm.selectedAudio.collectAsStateWithLifecycle()
+    val currentAudio    by vm.currentAudioFile.collectAsStateWithLifecycle()
+    val pickedAudio     by vm.pickedAudioFile.collectAsStateWithLifecycle()
+    val beatResponse    by vm.beatResponse.collectAsStateWithLifecycle()
+    val selectedRes     by vm.selectedRes.collectAsStateWithLifecycle()
+    val isLoadingAudio  by vm.isLoadingAudio.collectAsStateWithLifecycle()
+    val progressValue   by vm.progressValue.collectAsStateWithLifecycle()
+    val progressPhase   by vm.progressPhase.collectAsStateWithLifecycle()
+    val encodeStartMs   by vm.encodeStartMs.collectAsStateWithLifecycle()
+    val exportedUri     by vm.exportedUri.collectAsStateWithLifecycle()
+    val exportedName    by vm.exportedName.collectAsStateWithLifecycle()
+    val exportedSize    by vm.exportedSize.collectAsStateWithLifecycle()
+    val showCancelDialog by vm.showCancelDialog.collectAsStateWithLifecycle()
+
+    // Reset ViewModel and notify parent whenever the wizard is fully dismissed.
+    val dismiss = {
+        vm.resetWizard()
+        onDismiss()
+    }
+
+    // Audio picker — must live in Compose; result forwarded to ViewModel.
     val audioPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                isLoadingAudio = true
-                try {
-                    pickedAudioFile = loadAndAnalyze(context, uri)
-                    selectedAudio   = AudioSource.PickNew
-                    step            = WizardStep.BEAT
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to load audio: ${e.message}", Toast.LENGTH_LONG).show()
-                } finally {
-                    isLoadingAudio = false
-                }
-            }
-        }
+        if (uri != null) vm.loadPickedAudio(uri)
     }
 
     // ── Step routing ──────────────────────────────────────────────────────────
     when (step) {
         WizardStep.MODE -> Step1Mode(
-            modes = buildExportModeList(),
-            selected = selectedMode,
-            onSelect = { selectedMode = it },
-            onBack   = onDismiss,
-            onContinue = { step = WizardStep.AUDIO },
+            modes      = buildExportModeList(),
+            selected   = selectedMode,
+            onSelect   = { vm.selectMode(it) },
+            onBack     = dismiss,
+            onContinue = { vm.navTo(WizardStep.AUDIO) },
         )
 
         WizardStep.AUDIO -> Step2Audio(
-            currentAudio   = currentAudioFile,
-            pickedAudio    = pickedAudioFile,
-            selectedSource = selectedAudio,
-            isLoadingAudio = isLoadingAudio,
+            currentAudio    = currentAudio,
+            pickedAudio     = pickedAudio,
+            selectedSource  = selectedAudio,
+            isLoadingAudio  = isLoadingAudio,
             onSelect = { src ->
-                selectedAudio = src
-                if (src == AudioSource.PickNew && pickedAudioFile == null) {
+                vm.selectAudio(src)
+                if (src == AudioSource.PickNew && pickedAudio == null) {
                     audioPicker.launch(arrayOf("audio/*"))
                 }
             },
             onPickNew  = { audioPicker.launch(arrayOf("audio/*")) },
-            onBack     = { step = WizardStep.MODE },
+            onBack     = { vm.navTo(WizardStep.MODE) },
             onContinue = {
-                step = if (selectedAudio == AudioSource.Silent) WizardStep.RESOLUTION
-                       else WizardStep.BEAT
+                vm.navTo(
+                    if (selectedAudio == AudioSource.Silent) WizardStep.RESOLUTION
+                    else WizardStep.BEAT
+                )
             },
             continueEnabled = when (selectedAudio) {
-                AudioSource.UseCurrent -> currentAudioFile != null
-                AudioSource.PickNew    -> pickedAudioFile != null
+                AudioSource.UseCurrent -> currentAudio != null
+                AudioSource.PickNew    -> pickedAudio != null
                 AudioSource.Silent     -> true
             },
         )
 
         WizardStep.BEAT -> Step3Beat(
             beatResponse = beatResponse,
-            onSelect     = { beatResponse = it },
-            onBack       = { step = WizardStep.AUDIO },
-            onContinue   = { step = WizardStep.RESOLUTION },
+            onSelect     = { vm.selectBeatResponse(it) },
+            onBack       = { vm.navTo(WizardStep.AUDIO) },
+            onContinue   = { vm.navTo(WizardStep.RESOLUTION) },
         )
 
         WizardStep.RESOLUTION -> Step4Resolution(
             selected   = selectedRes,
-            onSelect   = { selectedRes = it },
-            onBack     = { step = if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT },
-            onStart    = {
-                val displayName = "abstrakt_${timestamp()}.mp4"
-                val fps = if (selectedRes == ExportResolution.UHD_4K) 30 else 60
-                val resolvedAudio = when (selectedAudio) {
-                    AudioSource.UseCurrent -> currentAudioFile
-                    AudioSource.PickNew    -> pickedAudioFile
-                    AudioSource.Silent     -> null
-                }
-                val userSkinPath = resolveUserSkinPath(selectedMode)
-
-                step = WizardStep.PROGRESS
-                progressValue = 0f
-                progressPhase = ""
-                encodeStartMs = 0L
-
-                exportJob = scope.launch {
-                    val storeUri = try {
-                        createMediaStoreEntry(context, displayName)
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Cannot create export file: ${e.message}", Toast.LENGTH_LONG).show()
-                        step = WizardStep.RESOLUTION
-                        return@launch
-                    }
-                    pendingStoreUri = storeUri
-
-                    try {
-                        val pfd = context.contentResolver.openFileDescriptor(storeUri, "w")
-                            ?: throw IOException("Cannot open output file")
-                        val exporter = Mp4Exporter(
-                            context  = context,
-                            width    = selectedRes.width,
-                            height   = selectedRes.height,
-                            fps      = fps,
-                            bitrate  = selectedRes.bitrate,
-                            audioFile          = resolvedAudio,
-                            exportMode         = selectedMode,
-                            userSkinFilePath   = userSkinPath,
-                            beatResponseEnabled = beatResponse,
-                            outputFd = pfd.fileDescriptor,
-                        )
-                        val result = exporter.export { fraction, phase ->
-                            progressValue = fraction
-                            progressPhase = phase
-                        }
-                        val fileSize = pfd.statSize
-                        pfd.close()
-
-                        result.fold(
-                            onSuccess = {
-                                finalizeMediaStoreEntry(context, storeUri)
-                                exportedUri  = storeUri
-                                exportedName = displayName
-                                exportedSize = fileSize
-                                pendingStoreUri = null
-                                step = WizardStep.DONE
-                            },
-                            onFailure = { e ->
-                                deleteMediaStoreEntry(context, storeUri)
-                                pendingStoreUri = null
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                                }
-                                step = WizardStep.RESOLUTION
-                            },
-                        )
-                    } catch (e: CancellationException) {
-                        pendingStoreUri?.let { deleteMediaStoreEntry(context, it) }
-                        pendingStoreUri = null
-                        throw e
-                    } catch (e: Exception) {
-                        pendingStoreUri?.let { deleteMediaStoreEntry(context, it) }
-                        pendingStoreUri = null
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                        }
-                        step = WizardStep.RESOLUTION
-                    }
-                }
-            },
+            onSelect   = { vm.selectResolution(it) },
+            onBack     = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
+            onStart    = { vm.startExport() },
         )
 
         WizardStep.PROGRESS -> {
@@ -263,30 +163,26 @@ fun ExportWizard(
             } else -1L
 
             Step5Progress(
-                progress   = progressValue,
-                phase      = progressPhase,
-                etaMs      = etaMs,
-                onCancel   = { showCancelDialog = true },
+                progress = progressValue,
+                phase    = progressPhase,
+                etaMs    = etaMs,
+                onCancel = { vm.requestCancelDialog() },
             )
 
             if (showCancelDialog) {
                 AlertDialog(
-                    onDismissRequest = { showCancelDialog = false },
+                    onDismissRequest = { vm.dismissCancelDialog() },
                     containerColor   = Color(0xFF1A1A24),
                     title  = { Text("Cancel export?", color = NeonCyan) },
                     text   = { Text("Progress will be lost.", color = DimWhite) },
                     confirmButton = {
                         TextButton(onClick = {
-                            showCancelDialog = false
-                            val uri = pendingStoreUri
-                            pendingStoreUri = null
-                            exportJob?.cancel()
-                            if (uri != null) deleteMediaStoreEntry(context, uri)
+                            vm.cancelExport()
                             onDismiss()
                         }) { Text("Cancel export", color = Color(0xFFFF4040)) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showCancelDialog = false }) {
+                        TextButton(onClick = { vm.dismissCancelDialog() }) {
                             Text("Keep waiting", color = DimWhite)
                         }
                     },
@@ -295,10 +191,10 @@ fun ExportWizard(
         }
 
         WizardStep.DONE -> Step6Done(
-            name     = exportedName,
-            sizePx   = exportedSize,
-            uri      = exportedUri,
-            onDismiss = onDismiss,
+            name      = exportedName,
+            sizePx    = exportedSize,
+            uri       = exportedUri,
+            onDismiss = dismiss,
         )
     }
 }
@@ -461,33 +357,82 @@ private fun Step5Progress(
     val pct = (progress * 100).toInt()
     val phaseLabel = if (phase.isEmpty()) "Starting…" else "$phase $pct%"
 
-    Column(
-        modifier = Modifier.fillMaxSize().background(BgColor).padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize().background(BgColor),
+        contentAlignment = Alignment.Center,
     ) {
-        CircularProgressIndicator(
-            progress = { progress },
-            color    = NeonCyan,
-            modifier = Modifier.size(80.dp),
-            strokeWidth = 6.dp,
-        )
-        Spacer(Modifier.height(24.dp))
-        Text(phaseLabel, color = NeonCyan, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(etaText, color = DimWhite, fontSize = 14.sp)
-        Spacer(Modifier.height(48.dp))
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth(),
-            color    = NeonCyan,
-        )
-        Spacer(Modifier.height(48.dp))
-        Button(
-            onClick = onCancel,
-            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFFCC2222)),
-        ) {
-            Text("Cancel", color = Color.White, fontWeight = FontWeight.Bold)
+        val isLandscape = maxWidth > maxHeight
+        if (isLandscape) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                CircularProgressIndicator(
+                    progress    = { progress },
+                    color       = NeonCyan,
+                    modifier    = Modifier.size(80.dp),
+                    strokeWidth = 6.dp,
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 48.dp),
+                    horizontalAlignment = Alignment.Start,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(phaseLabel, color = NeonCyan, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(etaText, color = DimWhite, fontSize = 14.sp)
+                    Spacer(Modifier.height(24.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color    = NeonCyan,
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = onCancel,
+                        colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFFCC2222)),
+                    ) {
+                        Text("Cancel", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                CircularProgressIndicator(
+                    progress    = { progress },
+                    color       = NeonCyan,
+                    modifier    = Modifier.size(80.dp),
+                    strokeWidth = 6.dp,
+                )
+                Spacer(Modifier.height(24.dp))
+                Text(phaseLabel, color = NeonCyan, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(etaText, color = DimWhite, fontSize = 14.sp)
+                Spacer(Modifier.height(48.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color    = NeonCyan,
+                )
+                Spacer(Modifier.height(48.dp))
+                Button(
+                    onClick = onCancel,
+                    colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFFCC2222)),
+                ) {
+                    Text("Cancel", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -702,7 +647,7 @@ private fun modeName(mode: Mode): String = when (mode) {
     Mode.AddSlot     -> "Add Slot"
 }
 
-private fun resolveUserSkinPath(mode: Mode): String? {
+internal fun resolveUserSkinPath(mode: Mode): String? {
     if (mode !is Mode.UserSlot) return null
     return SkinSlotRegistry.filledSlots().find { it.index == mode.slotIndex }?.file?.absolutePath
 }
@@ -722,10 +667,10 @@ private fun formatBytes(bytes: Long): String = when {
     else                -> "$bytes B"
 }
 
-private fun timestamp(): String =
+internal fun timestamp(): String =
     LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HHmmss"))
 
-private fun createMediaStoreEntry(context: Context, displayName: String): Uri {
+internal fun createMediaStoreEntry(context: Context, displayName: String): Uri {
     val values = ContentValues().apply {
         put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -736,11 +681,11 @@ private fun createMediaStoreEntry(context: Context, displayName: String): Uri {
         ?: throw IOException("Failed to create MediaStore entry")
 }
 
-private fun finalizeMediaStoreEntry(context: Context, uri: Uri) {
+internal fun finalizeMediaStoreEntry(context: Context, uri: Uri) {
     val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
     context.contentResolver.update(uri, values, null, null)
 }
 
-private fun deleteMediaStoreEntry(context: Context, uri: Uri) {
+internal fun deleteMediaStoreEntry(context: Context, uri: Uri) {
     runCatching { context.contentResolver.delete(uri, null, null) }
 }
