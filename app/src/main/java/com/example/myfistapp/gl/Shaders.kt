@@ -290,7 +290,7 @@ internal object Shaders {
     // CYCLONE_KALEIDO_FRAG — White frame + 5% more zoomed kaleidoscope
     val CYCLONE_KALEIDO_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         const float PI = 3.14159265;
 

@@ -402,8 +402,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         ribbonTexA = texIds[0]; ribbonTexB = texIds[1]
         for (tex in texIds) {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
-                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            // GL_RGBA16F: half-float per channel prevents 8-bit quantization from
+            // freezing low-alpha trail values (round(n*0.992)=n for n<=63 in RGBA8).
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, w, h, 0,
+                GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -546,8 +548,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val rProg = ribbonProgram
         val bProg = blitProgram
 
-        // Advance rotation: 2π radians per 30 seconds.
-        cycloneAngleRad += dt * (2f * Math.PI.toFloat() / 30f)
+        // Advance rotation: 2π radians per 30 seconds. Keep in [0, 2π) so
+        // the mediump-precision shader receives a value that never exceeds ~6.3.
+        val twoPi = (2.0 * Math.PI).toFloat()
+        cycloneAngleRad    = (cycloneAngleRad + dt * (twoPi / 30f)).rem(twoPi)
+        kaleidoRotationRad = (kaleidoRotationRad + dt * 0.05f).rem(twoPi)
 
         // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
         val shakeAmp = beatDecay * 0.35f
@@ -743,7 +748,6 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 destroyKaleidoFBO()
                 createKaleidoFBO(surfaceWidth, surfaceHeight)
             }
-            kaleidoRotationRad += dt * 0.05f
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, kaleidoFBO)
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
             GLES30.glDisable(GLES30.GL_BLEND)
