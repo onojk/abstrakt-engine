@@ -248,6 +248,9 @@ private fun VisualizerScreen() {
     LaunchedEffect(kaleidoSettings.frameColorArgb) {
         glView.setFrameColorArgb(kaleidoSettings.frameColorArgb)
     }
+    LaunchedEffect(kaleidoSettings.zoomMultiplier) {
+        glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
+    }
 
     val livePulse = remember { Animatable(0.4f) }
 
@@ -932,6 +935,8 @@ private fun VisualizerScreen() {
                 onSquareRotationLockedChange = { kaleidoVm.setSquareRotationLocked(it) },
                 onFrameShapeChange           = { kaleidoVm.setFrameShape(it) },
                 onFrameColorChange           = { kaleidoVm.setFrameColorArgb(it) },
+                onZoomMultiplierChange       = { kaleidoVm.setZoomMultiplier(it) },
+                onResetZoom                  = { kaleidoVm.resetZoomMultiplier() },
             )
         }
     }
@@ -1103,6 +1108,8 @@ private fun KaleidoSettingsContent(
     onSquareRotationLockedChange: (Boolean) -> Unit,
     onFrameShapeChange: (FrameShape) -> Unit,
     onFrameColorChange: (Long) -> Unit,
+    onZoomMultiplierChange: (Float) -> Unit,
+    onResetZoom: () -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
     Column(
@@ -1243,6 +1250,42 @@ private fun KaleidoSettingsContent(
                 },
             )
         }
+
+        Spacer(Modifier.height(16.dp))
+        Text("Zoom", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text       = "${(settings.zoomMultiplier * 100).toInt()}%",
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
+            )
+            Slider(
+                value         = settings.zoomMultiplier,
+                onValueChange = { onZoomMultiplierChange(it) },
+                valueRange    = 0.5f..1.5f,
+                steps         = 19,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            TextButton(onClick = onResetZoom) {
+                Text("Reset", color = NeonCyan)
+            }
+        }
+        Text(
+            text  = when {
+                settings.zoomMultiplier < 0.95f -> "Zoomed in (less border)"
+                settings.zoomMultiplier > 1.05f -> "Zoomed out (more border)"
+                else                            -> "Default"
+            },
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
 
         Spacer(Modifier.height(32.dp))
     }

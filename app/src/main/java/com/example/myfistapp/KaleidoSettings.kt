@@ -9,6 +9,7 @@ data class KaleidoSettings(
     val squareRotationLocked: Boolean = false,
     val frameShape: FrameShape = FrameShape.Circle,
     val frameColorArgb: Long = 0xFFFFFFFFL,
+    val zoomMultiplier: Float = 1.0f,
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

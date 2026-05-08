@@ -38,4 +38,12 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setFrameColorArgb(value: Long) {
         viewModelScope.launch { store.setFrameColorArgb(value) }
     }
+
+    fun setZoomMultiplier(value: Float) {
+        viewModelScope.launch { store.setZoomMultiplier(value) }
+    }
+
+    fun resetZoomMultiplier() {
+        viewModelScope.launch { store.setZoomMultiplier(1.0f) }
+    }
 }

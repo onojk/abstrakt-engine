@@ -95,6 +95,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var shapeDepthBuffer = 0
     private var shapeFboW        = 0
     private var shapeFboH        = 0
+    @Volatile var zoomMultiplier  = 1.0f
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -809,7 +810,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
             val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
             kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
-            kProg.setFloat("u_kaleido_zoom", currentShape.kaleidoZoom())
+            val effectiveZoom = currentShape.kaleidoZoom() * zoomMultiplier
+            kProg.setFloat("u_kaleido_zoom", effectiveZoom)
             drawQuad()
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)

@@ -59,4 +59,5 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setLiveSnapshot(snap: AudioSnapshot?)    { renderer.audioUniforms.liveSnapshot = snap }
     fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
     fun cycleShape()                             { renderer.cycleShape() }
+    fun setZoomMultiplier(value: Float)          { queueEvent { renderer.zoomMultiplier = value } }
 }
