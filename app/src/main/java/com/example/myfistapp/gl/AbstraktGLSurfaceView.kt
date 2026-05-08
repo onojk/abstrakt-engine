@@ -14,6 +14,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         setRenderer(renderer)
         renderMode = RENDERMODE_CONTINUOUSLY
+        preserveEGLContextOnPause = true
     }
 
     fun setAudioFile(file: com.example.myfistapp.audio.AudioFile?) = renderer.setAudioFile(file)

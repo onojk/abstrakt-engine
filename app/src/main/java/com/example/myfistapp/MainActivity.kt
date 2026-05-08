@@ -169,8 +169,8 @@ private fun VisualizerScreen() {
     var showClearConfirm by remember { mutableStateOf(false) }
     // Add-skin menu anchor — whether the dropdown is visible and which anchor triggered it.
     var showAddMenu      by remember { mutableStateOf(false) }
-    // Kaleido settings sheet.
-    var showSettings     by remember { mutableStateOf(false) }
+    // Kaleido settings sheet — survives rotation via ViewModel StateFlow.
+    val isSettingsOpen by kaleidoVm.isSheetOpen.collectAsStateWithLifecycle()
 
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
@@ -761,7 +761,7 @@ private fun VisualizerScreen() {
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(NeonCyan.copy(alpha = 0.15f))
-                        .clickable { showSettings = true },
+                        .clickable { kaleidoVm.openSheet() },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -876,9 +876,9 @@ private fun VisualizerScreen() {
     }
 
     // ── Kaleido settings sheet ────────────────────────────────────────────────
-    if (showSettings) {
+    if (isSettingsOpen) {
         ModalBottomSheet(
-            onDismissRequest = { showSettings = false },
+            onDismissRequest = { kaleidoVm.closeSheet() },
             sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor   = Color(0xFF1A1A24),
         ) {
