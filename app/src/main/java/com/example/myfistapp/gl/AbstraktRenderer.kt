@@ -809,6 +809,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
             val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
             kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
+            kProg.setFloat("u_kaleido_zoom", currentShape.kaleidoZoom())
             drawQuad()
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)

@@ -301,6 +301,7 @@ internal object Shaders {
         uniform float     u_kaleido_rotation;
         uniform float     u_kaleido_folds;
         uniform float     u_kaleido_rotation_offset;
+        uniform float     u_kaleido_zoom;
 
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -322,7 +323,7 @@ internal object Shaders {
             // Inverse of: centered = (v_uv * res - res*0.5) / minDim
             //         =>  v_uv = centered * minDim / res + 0.5
             vec2 folded   = vec2(cos(theta) * r, sin(theta) * r);
-            vec2 sampleUV = folded * minDim / u_resolution + 0.5;
+            vec2 sampleUV = folded * minDim / u_resolution * u_kaleido_zoom + 0.5;
 
             fragColor = texture(u_content, sampleUV);
         }
