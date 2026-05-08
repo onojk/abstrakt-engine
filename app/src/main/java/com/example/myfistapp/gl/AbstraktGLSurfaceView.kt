@@ -22,6 +22,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setPainter(painter: Painter)         { renderer.audioUniforms.activePainter = painter }
     fun setSkinIndex(index: Int)             { renderer.skinIndex = index }
     fun setKaleidoFolds(folds: Float)        { renderer.kaleidoFolds = folds }
+    fun setFoldCount(count: Int)             { renderer.foldCount = count }
     fun setRibbonColor(r: Float, g: Float, b: Float) {
         renderer.ribbonColor[0] = r
         renderer.ribbonColor[1] = g

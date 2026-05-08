@@ -22,7 +22,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -136,6 +139,9 @@ private fun VisualizerScreen() {
     val exportVm: ExportViewModel = viewModel()
     val isWizardOpen by exportVm.isWizardOpen.collectAsStateWithLifecycle()
 
+    val kaleidoVm: KaleidoSettingsViewModel = viewModel()
+    val kaleidoSettings by kaleidoVm.settings.collectAsStateWithLifecycle()
+
     var audioFile        by remember { mutableStateOf<AudioFile?>(null) }
     var isLoading        by remember { mutableStateOf(false) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
@@ -163,6 +169,8 @@ private fun VisualizerScreen() {
     var showClearConfirm by remember { mutableStateOf(false) }
     // Add-skin menu anchor — whether the dropdown is visible and which anchor triggered it.
     var showAddMenu      by remember { mutableStateOf(false) }
+    // Kaleido settings sheet.
+    var showSettings     by remember { mutableStateOf(false) }
 
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
@@ -216,6 +224,11 @@ private fun VisualizerScreen() {
             if (dur > 0) playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
             delay(16L)
         }
+    }
+
+    // Push global fold count to the GL renderer whenever the setting changes.
+    LaunchedEffect(kaleidoSettings.foldCount) {
+        glView.setFoldCount(kaleidoSettings.foldCount)
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -741,6 +754,23 @@ private fun VisualizerScreen() {
                         }
                     }
                 }
+
+                // ⚙ Settings button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(NeonCyan.copy(alpha = 0.15f))
+                        .clickable { showSettings = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector        = Icons.Default.Settings,
+                        contentDescription = "Visual settings",
+                        tint               = NeonCyan,
+                        modifier           = Modifier.size(22.dp),
+                    )
+                }
             }
 
             // "● LIVE" pulsing indicator shown below buttons while mic is active.
@@ -843,6 +873,20 @@ private fun VisualizerScreen() {
                 }
             },
         )
+    }
+
+    // ── Kaleido settings sheet ────────────────────────────────────────────────
+    if (showSettings) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettings = false },
+            sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor   = Color(0xFF1A1A24),
+        ) {
+            KaleidoSettingsContent(
+                settings          = kaleidoSettings,
+                onFoldCountChange = { kaleidoVm.setFoldCount(it) },
+            )
+        }
     }
 }
 
@@ -993,7 +1037,6 @@ private fun GlCanvas(
                     view.setPainter(cfg.painter)
                     view.setSkinIndex(cfg.skinIndex)
                     view.setUserSkinFile(userPath)
-                    view.setKaleidoFolds(cfg.folds)
                     view.setRibbonColor(cfg.rr, cfg.rg, cfg.rb)
                     view.setBeatThreshold(cfg.beatThreshold)
                 }
@@ -1001,4 +1044,57 @@ private fun GlCanvas(
         },
         modifier = modifier,
     )
+}
+
+// ── Kaleido settings sheet content ────────────────────────────────────────────
+
+@Composable
+private fun KaleidoSettingsContent(
+    settings: KaleidoSettings,
+    onFoldCountChange: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .fillMaxWidth(),
+    ) {
+        Text(
+            "Kaleido Settings",
+            style = MaterialTheme.typography.titleLarge,
+            color = NeonCyan,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Fold count: ${settings.foldCount}",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Color.White,
+        )
+        Slider(
+            value       = settings.foldCount.toFloat(),
+            onValueChange = { onFoldCountChange(it.toInt()) },
+            valueRange  = 2f..24f,
+            steps       = 21,   // 23 selectable positions: 2, 3, … 24
+        )
+        Text(
+            text  = foldCountHint(settings.foldCount),
+            style = MaterialTheme.typography.bodySmall,
+            color = DimWhite,
+        )
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
+private fun foldCountHint(count: Int): String = when (count) {
+    2          -> "Mirror — split-screen reflection"
+    3          -> "Tri-mirror — three-way symmetry"
+    4          -> "Cross — four-way symmetry"
+    5          -> "Penta — five-way star"
+    6          -> "Hex — hexagonal symmetry"
+    7, 8       -> "Octagonal feel"
+    9, 10, 11  -> "Decagonal — many sides"
+    12         -> "Clock-face — classic kaleidoscope"
+    in 13..16  -> "Fine pinwheel"
+    in 17..20  -> "Very fine pinwheel"
+    in 21..24  -> "Pinwheel — almost rotationally smooth"
+    else       -> ""
 }
