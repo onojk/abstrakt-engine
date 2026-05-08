@@ -15,7 +15,7 @@ internal object Shaders {
 
     val TEST_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
         uniform float u_time;
         uniform vec2  u_resolution;
         uniform float u_peak;
@@ -37,7 +37,7 @@ internal object Shaders {
 
     val WARP_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         const int INF_COUNT = 5;
 
@@ -120,7 +120,7 @@ internal object Shaders {
 
     val DRIFT_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         const int   NUM_BARS   = 32;
         const int   NUM_BANDS  = 8;
@@ -179,7 +179,7 @@ internal object Shaders {
 
     val KALEIDO_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         const float PI = 3.14159265358979;
 
@@ -240,7 +240,7 @@ internal object Shaders {
     // Hue cycles every 20s so each stripe's age is visually readable.
     val PAINTER_HUESTRIPE_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
         uniform float u_time;
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -262,7 +262,7 @@ internal object Shaders {
     // Each column's hue, brightness, and saturation track its band's energy.
     val PAINTER_AUDIOPAINT_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
         uniform float u_time;
         uniform float u_peak;
         uniform float u_beat_decay;
@@ -434,7 +434,7 @@ internal object Shaders {
     // Dot brightness scales with u_peak; hue shifts per job. FBO aspect 4:1.
     val PAINTER_PRINTHEAD_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         uniform float u_time;
         uniform float u_peak;
@@ -528,7 +528,7 @@ internal object Shaders {
 
     val DRIFT_POLAR_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         // NOTE: Bars are computed in polar space directly, not rendered cartesian
         // and folded. The earlier two-pass attempt (vertical bars to FBO, then
@@ -634,7 +634,7 @@ internal object Shaders {
     // the kaleido 12-fold fold provides all angular replication.
     val RIBBON_FRAG = """
         #version 300 es
-        precision mediump float;
+        precision highp float;
 
         const float TRAIL_DECAY = 0.992;
         const float TWO_PI      = 6.28318530718;

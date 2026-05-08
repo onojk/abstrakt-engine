@@ -99,6 +99,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var lastFrameNs   = 0L
     private var frameCount      = 0
     private var lastFrameLogMs  = 0L
+    private var lastTimeLogMs   = 0L
     @Volatile var dumpPainterStatsOnNextFrame = false
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.
     @Volatile var currentMode: Mode = Mode.Cyclone
@@ -146,6 +147,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         lastFrameNs     = 0L
         frameCount      = 0
         lastFrameLogMs  = 0L
+        lastTimeLogMs   = 0L
         lastStampedMode   = null   // force re-stamp after context loss
         allResourcesReady = false
         audioUniforms.uniformsLogged = false
@@ -428,9 +430,14 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     override fun onDrawFrame(gl: GL10?) {
         val nowNs = System.nanoTime()
         if (startTimeNs == 0L) { startTimeNs = nowNs; lastFrameNs = nowNs }
-        val timeSec = (nowNs - startTimeNs) / 1_000_000_000f
-        val dt      = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceAtMost(0.1f)
-        lastFrameNs = nowNs
+
+        // Keep u_time in [0, 600) to prevent Float precision loss in shader trig.
+        // At 600s Float still has ~36µs resolution — far finer than one frame interval.
+        // Compute in Double first so the intermediate result isn't truncated to Float range.
+        val elapsedSec = (nowNs - startTimeNs).toDouble() / 1_000_000_000.0
+        val timeSec    = elapsedSec.rem(600.0).toFloat()
+        val dt         = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceAtMost(0.1f)
+        lastFrameNs    = nowNs
 
         frameCount++
         val fpsNow = System.currentTimeMillis()
@@ -439,6 +446,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             Log.d(TAG, "FPS over last 5s: ${"%.1f".format(frameCount * 1000.0 / (fpsNow - lastFrameLogMs))}")
             frameCount = 0
             lastFrameLogMs = fpsNow
+        }
+        if (fpsNow - lastTimeLogMs >= 60_000L || lastTimeLogMs == 0L) {
+            Log.d(TAG, "u_time: raw=${"%.1f".format(elapsedSec)}s  wrapped=${"%.3f".format(timeSec)}s")
+            lastTimeLogMs = fpsNow
         }
         if (dumpPainterStatsOnNextFrame) {
             dumpPainterStatsOnNextFrame = false
