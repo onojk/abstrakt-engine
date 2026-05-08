@@ -421,7 +421,9 @@ internal object Shaders {
             float pw   = 1.5 / min(u_resolution.x, u_resolution.y);
             float mask = 1.0 - smoothstep(-pw, pw, sdf);
 
-            fragColor = mix(u_frame_color, kaleido, mask);
+            vec3 tinted  = mix(kaleido.rgb, u_frame_color.rgb, u_frame_color.a);
+            vec3 finalRgb = mix(tinted, kaleido.rgb, mask);
+            fragColor = vec4(finalRgb, 1.0);
         }
     """.trimIndent()
 
