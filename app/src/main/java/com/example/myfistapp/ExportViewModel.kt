@@ -19,8 +19,17 @@ import java.io.IOException
 
 class ExportViewModel(app: Application) : AndroidViewModel(app) {
 
+    // ── Wizard visibility ─────────────────────────────────────────────────────
+
+    private val _isWizardOpen = MutableStateFlow(false)
+    val isWizardOpen: StateFlow<Boolean> = _isWizardOpen.asStateFlow()
+
+    // ── Wizard step ───────────────────────────────────────────────────────────
+
     private val _step = MutableStateFlow(WizardStep.MODE)
     internal val step: StateFlow<WizardStep> = _step.asStateFlow()
+
+    // ── Config state ──────────────────────────────────────────────────────────
 
     private val _selectedMode = MutableStateFlow<Mode>(Mode.Cyclone)
     val selectedMode: StateFlow<Mode> = _selectedMode.asStateFlow()
@@ -28,7 +37,6 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     private val _selectedAudio = MutableStateFlow<AudioSource>(AudioSource.Silent)
     val selectedAudio: StateFlow<AudioSource> = _selectedAudio.asStateFlow()
 
-    // The audio file that was loaded in the main screen when the wizard was opened.
     private val _currentAudioFile = MutableStateFlow<AudioFile?>(null)
     val currentAudioFile: StateFlow<AudioFile?> = _currentAudioFile.asStateFlow()
 
@@ -44,6 +52,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     private val _isLoadingAudio = MutableStateFlow(false)
     val isLoadingAudio: StateFlow<Boolean> = _isLoadingAudio.asStateFlow()
 
+    // ── Progress state ────────────────────────────────────────────────────────
+
     private val _progressValue = MutableStateFlow(0f)
     val progressValue: StateFlow<Float> = _progressValue.asStateFlow()
 
@@ -52,6 +62,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _encodeStartMs = MutableStateFlow(0L)
     val encodeStartMs: StateFlow<Long> = _encodeStartMs.asStateFlow()
+
+    // ── Done state ────────────────────────────────────────────────────────────
 
     private val _exportedUri = MutableStateFlow<Uri?>(null)
     val exportedUri: StateFlow<Uri?> = _exportedUri.asStateFlow()
@@ -62,28 +74,55 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     private val _exportedSize = MutableStateFlow(0L)
     val exportedSize: StateFlow<Long> = _exportedSize.asStateFlow()
 
+    // ── Cancel dialog ─────────────────────────────────────────────────────────
+
     private val _showCancelDialog = MutableStateFlow(false)
     val showCancelDialog: StateFlow<Boolean> = _showCancelDialog.asStateFlow()
 
+    // ── Internal job tracking ─────────────────────────────────────────────────
+
     private var exportJob: Job? = null
     private var pendingStoreUri: Uri? = null
-    private var initialized = false
 
-    fun initializeIfNeeded(mode: Mode, audioFile: AudioFile?) {
-        if (initialized) return
-        initialized = true
-        _selectedMode.value   = if (mode != Mode.AddSlot) mode else Mode.Cyclone
-        _selectedAudio.value  = if (audioFile != null) AudioSource.UseCurrent else AudioSource.Silent
+    // ── Wizard lifecycle ──────────────────────────────────────────────────────
+
+    // Opens the wizard. If an export is in progress, resumes the PROGRESS step.
+    // If on the DONE step, re-shows the completion screen. Otherwise resets for
+    // a fresh flow and initializes config from the caller's current screen state.
+    fun openWizard(mode: Mode, audioFile: AudioFile?) {
+        if (exportJob?.isActive == true || _step.value == WizardStep.DONE) {
+            _isWizardOpen.value = true
+            return
+        }
+        resetWizardState()
+        _selectedMode.value     = if (mode != Mode.AddSlot) mode else Mode.Cyclone
+        _selectedAudio.value    = if (audioFile != null) AudioSource.UseCurrent else AudioSource.Silent
         _currentAudioFile.value = audioFile
+        _step.value             = WizardStep.MODE
+        _isWizardOpen.value     = true
     }
 
-    fun selectMode(mode: Mode)           { _selectedMode.value = mode }
-    fun selectAudio(source: AudioSource) { _selectedAudio.value = source }
-    fun selectBeatResponse(on: Boolean)  { _beatResponse.value = on }
+    // Closes the wizard UI without canceling an in-progress export.
+    // If the export just completed (DONE step), clears completion state so the
+    // next open starts fresh rather than jumping back to the done screen.
+    fun closeWizard() {
+        _isWizardOpen.value = false
+        if (_step.value == WizardStep.DONE) {
+            resetWizardState()
+        }
+    }
+
+    // ── Config mutators ───────────────────────────────────────────────────────
+
+    fun selectMode(mode: Mode)                  { _selectedMode.value = mode }
+    fun selectAudio(source: AudioSource)        { _selectedAudio.value = source }
+    fun selectBeatResponse(on: Boolean)         { _beatResponse.value = on }
     fun selectResolution(res: ExportResolution) { _selectedRes.value = res }
-    internal fun navTo(step: WizardStep) { _step.value = step }
-    fun requestCancelDialog()            { _showCancelDialog.value = true }
-    fun dismissCancelDialog()            { _showCancelDialog.value = false }
+    internal fun navTo(step: WizardStep)        { _step.value = step }
+    fun requestCancelDialog()                   { _showCancelDialog.value = true }
+    fun dismissCancelDialog()                   { _showCancelDialog.value = false }
+
+    // ── Audio loading ─────────────────────────────────────────────────────────
 
     fun loadPickedAudio(uri: Uri) {
         val ctx = getApplication<Application>()
@@ -103,6 +142,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    // ── Export ────────────────────────────────────────────────────────────────
 
     fun startExport() {
         val ctx = getApplication<Application>()
@@ -201,7 +242,9 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         if (uri != null) deleteMediaStoreEntry(getApplication(), uri)
     }
 
-    fun resetWizard() {
+    // ── Internal reset ────────────────────────────────────────────────────────
+
+    private fun resetWizardState() {
         cancelExport()
         _step.value             = WizardStep.MODE
         _selectedMode.value     = Mode.Cyclone
@@ -217,7 +260,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _exportedUri.value      = null
         _exportedName.value     = ""
         _exportedSize.value     = 0L
-        initialized             = false
+        _showCancelDialog.value = false
     }
 
     override fun onCleared() {

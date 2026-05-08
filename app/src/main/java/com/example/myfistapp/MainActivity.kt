@@ -84,6 +84,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.StreamingAnalyzer
 import com.example.myfistapp.audio.loadAndAnalyze
@@ -131,13 +133,15 @@ private fun VisualizerScreen() {
     val scope         = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val exportVm: ExportViewModel = viewModel()
+    val isWizardOpen by exportVm.isWizardOpen.collectAsStateWithLifecycle()
+
     var audioFile        by remember { mutableStateOf<AudioFile?>(null) }
     var isLoading        by remember { mutableStateOf(false) }
     var errorMsg         by remember { mutableStateOf<String?>(null) }
     var isPlaying        by remember { mutableStateOf(false) }
     var playbackFraction by remember { mutableFloatStateOf(0f) }
     var currentMode      by remember { mutableStateOf<Mode>(Mode.Cyclone) }
-    var showExportWizard by remember { mutableStateOf(false) }
     var registryVersion  by remember { mutableIntStateOf(0) }
     var showCropper      by remember { mutableStateOf(false) }
     var pendingPhotoUri  by remember { mutableStateOf<Uri?>(null) }
@@ -421,11 +425,10 @@ private fun VisualizerScreen() {
     }
 
     // ── Export wizard swap ────────────────────────────────────────────────────
-    if (showExportWizard) {
+    if (isWizardOpen) {
         ExportWizard(
-            currentMode      = currentMode,
-            currentAudioFile = audioFile,
-            onDismiss        = { showExportWizard = false },
+            viewModel = exportVm,
+            onClose   = { exportVm.closeWizard() },
         )
         return
     }
@@ -698,7 +701,7 @@ private fun VisualizerScreen() {
                         .background(NeonCyan.copy(alpha = 0.15f))
                         .alpha(if (isRendererReady) 1f else 0.3f)
                         .clickable(enabled = isRendererReady) {
-                            showExportWizard = true
+                            exportVm.openWizard(currentMode, audioFile)
                         },
                     contentAlignment = Alignment.Center,
                 ) {

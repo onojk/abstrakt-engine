@@ -38,7 +38,6 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfistapp.audio.AudioFile
 import java.io.IOException
 import java.time.LocalDateTime
@@ -64,16 +62,10 @@ internal enum class WizardStep { MODE, AUDIO, BEAT, RESOLUTION, PROGRESS, DONE }
 
 @Composable
 fun ExportWizard(
-    currentMode: Mode,
-    currentAudioFile: AudioFile?,
-    onDismiss: () -> Unit,
+    viewModel: ExportViewModel,
+    onClose: () -> Unit,
 ) {
-    val vm: ExportViewModel = viewModel()
-
-    // Initialize wizard state once per open; no-op on recomposition after rotation.
-    LaunchedEffect(Unit) {
-        vm.initializeIfNeeded(currentMode, currentAudioFile)
-    }
+    val vm = viewModel
 
     // Collect all state from the ViewModel.
     val step            by vm.step.collectAsStateWithLifecycle()
@@ -92,11 +84,7 @@ fun ExportWizard(
     val exportedSize    by vm.exportedSize.collectAsStateWithLifecycle()
     val showCancelDialog by vm.showCancelDialog.collectAsStateWithLifecycle()
 
-    // Reset ViewModel and notify parent whenever the wizard is fully dismissed.
-    val dismiss = {
-        vm.resetWizard()
-        onDismiss()
-    }
+    val dismiss = onClose
 
     // Audio picker — must live in Compose; result forwarded to ViewModel.
     val audioPicker = rememberLauncherForActivityResult(
@@ -178,7 +166,7 @@ fun ExportWizard(
                     confirmButton = {
                         TextButton(onClick = {
                             vm.cancelExport()
-                            onDismiss()
+                            onClose()
                         }) { Text("Cancel export", color = Color(0xFFFF4040)) }
                     },
                     dismissButton = {
