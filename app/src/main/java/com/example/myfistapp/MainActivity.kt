@@ -82,7 +82,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1184,10 +1183,12 @@ private fun KaleidoSettingsContent(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(currentColor)
                     .border(2.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                     .clickable { showColorPicker = true },
-            )
+            ) {
+                Checkerboard(Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background(currentColor))
+            }
             Spacer(Modifier.width(16.dp))
             Column {
                 Text(
@@ -1206,10 +1207,10 @@ private fun KaleidoSettingsContent(
 
         if (showColorPicker) {
             FrameColorPickerDialog(
-                initialColor = currentColor,
-                onDismiss    = { showColorPicker = false },
-                onConfirm    = { newColor ->
-                    onFrameColorChange(newColor.toArgb().toLong() and 0xFFFFFFFFL)
+                initialColorArgb = settings.frameColorArgb,
+                onDismiss        = { showColorPicker = false },
+                onConfirm        = { newArgb ->
+                    onFrameColorChange(newArgb)
                     showColorPicker = false
                 },
             )
