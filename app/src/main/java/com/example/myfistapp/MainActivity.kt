@@ -109,6 +109,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 
 // Carousel mode model — sealed hierarchy for the swipe carousel.
 sealed class Mode {
@@ -166,6 +174,9 @@ private fun VisualizerScreen() {
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     // "Replace" flow: slotIndex being replaced (null = fresh add).
     var replacingSlotIndex by remember { mutableStateOf<Int?>(null) }
+    // Delete-skin flow.
+    var showDeletePicker      by remember { mutableStateOf(false) }
+    var skinSlotPendingDelete by remember { mutableStateOf<Int?>(null) }
 
     // Mic state.
     var isMicActive         by remember { mutableStateOf(false) }
@@ -503,17 +514,9 @@ private fun VisualizerScreen() {
         Mode.AddSlot     -> "abstrakt"
     }
 
-    // ── Add-skin entry point — checks full, then shows menu ──────────────────
+    // ── Add-skin entry point — always shows menu; delete option works even when full ──
     fun onAddSkinTapped() {
-        if (SkinSlotRegistry.isFull()) {
-            Toast.makeText(
-                context,
-                "All 40 slots are full. Long-press a skin to clear it.",
-                Toast.LENGTH_LONG,
-            ).show()
-        } else {
-            showAddMenu = true
-        }
+        showAddMenu = true
     }
 
     Column(
@@ -590,6 +593,18 @@ private fun VisualizerScreen() {
                     DropdownMenuItem(
                         text    = { Text("Pick from Gallery") },
                         onClick = { showAddMenu = false; onPickGallery() },
+                    )
+                    DropdownMenuItem(
+                        text    = { Text("Delete a skin", color = Color(0xFFFF4040)) },
+                        onClick = { showAddMenu = false; showDeletePicker = true },
+                        leadingIcon = {
+                            Icon(
+                                imageVector        = Icons.Default.Delete,
+                                contentDescription = null,
+                                tint               = Color(0xFFFF4040),
+                            )
+                        },
+                        enabled = SkinSlotRegistry.filledSlots().isNotEmpty(),
                     )
                     Box(modifier = Modifier.padding(8.dp)) {
                         Text(
@@ -916,6 +931,84 @@ private fun VisualizerScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Cancel", color = DimWhite)
+                }
+            },
+        )
+    }
+
+    // ── Delete-skin picker dialog ─────────────────────────────────────────────
+    if (showDeletePicker) {
+        val filledSlots = SkinSlotRegistry.filledSlots()
+        AlertDialog(
+            onDismissRequest = { showDeletePicker = false },
+            containerColor   = Color(0xFF1A1A24),
+            title = { Text("Delete a skin", color = NeonCyan) },
+            text  = {
+                if (filledSlots.isEmpty()) {
+                    Text("No user skins to delete.", color = DimWhite)
+                } else {
+                    LazyVerticalGrid(
+                        columns               = GridCells.Fixed(3),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement   = Arrangement.spacedBy(8.dp),
+                        modifier              = Modifier.height(300.dp),
+                    ) {
+                        items(filledSlots, key = { it.index }) { slot ->
+                            UserSkinThumbnail(
+                                file    = slot.file,
+                                label   = "Slot ${slot.index + 1}",
+                                onClick = {
+                                    skinSlotPendingDelete = slot.index
+                                    showDeletePicker = false
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDeletePicker = false }) {
+                    Text("Cancel", color = DimWhite)
+                }
+            },
+        )
+    }
+
+    // ── Delete-skin confirmation dialog ───────────────────────────────────────
+    val pendingDeleteIdx = skinSlotPendingDelete
+    if (pendingDeleteIdx != null) {
+        AlertDialog(
+            onDismissRequest = { skinSlotPendingDelete = null },
+            containerColor   = Color(0xFF1A1A24),
+            title = { Text("Delete this skin?", color = NeonCyan) },
+            text  = { Text("Slot ${pendingDeleteIdx + 1} will be permanently removed.", color = DimWhite) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val old = SkinSlotRegistry.filledSlots().find { it.index == pendingDeleteIdx }?.file
+                    if (old != null) glView.invalidateUserSkinTexture(old.absolutePath)
+                    SkinSlotRegistry.clearSlot(pendingDeleteIdx)
+                    registryVersion++
+                    skinSlotPendingDelete = null
+                    if (currentMode == Mode.UserSlot(pendingDeleteIdx)) {
+                        val newModes = buildList {
+                            add(Mode.Cyclone)
+                            for (i in 1..5) add(Mode.Builtin(i))
+                            for (slot in SkinSlotRegistry.filledSlots()) add(Mode.UserSlot(slot.index))
+                            if (SkinSlotRegistry.firstEmptySlotIndex() != null) add(Mode.AddSlot)
+                        }
+                        val removedIdx = modes.indexOf(Mode.UserSlot(pendingDeleteIdx))
+                        currentMode = newModes.getOrElse(
+                            (removedIdx - 1).coerceAtLeast(0)
+                        ) { Mode.Cyclone }
+                    }
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { skinSlotPendingDelete = null }) {
                     Text("Cancel", color = DimWhite)
                 }
             },
@@ -1305,4 +1398,44 @@ private fun foldCountHint(count: Int): String = when (count) {
     in 17..20  -> "Very fine pinwheel"
     in 21..24  -> "Pinwheel — almost rotationally smooth"
     else       -> ""
+}
+
+// ── User skin thumbnail (for the delete picker grid) ─────────────────────────
+
+@Composable
+private fun UserSkinThumbnail(file: File, label: String, onClick: () -> Unit) {
+    var bitmap by remember(file.absolutePath) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(file.absolutePath) {
+        withContext(Dispatchers.IO) {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+            bitmap = BitmapFactory.decodeFile(file.absolutePath, opts)
+        }
+    }
+    Column(
+        modifier            = Modifier.clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF2A2A38))
+                .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val bm = bitmap
+            if (bm != null) {
+                Image(
+                    bitmap             = bm.asImageBitmap(),
+                    contentDescription = label,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize(),
+                )
+            } else {
+                CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(24.dp))
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = DimWhite, fontSize = 11.sp)
+    }
 }
