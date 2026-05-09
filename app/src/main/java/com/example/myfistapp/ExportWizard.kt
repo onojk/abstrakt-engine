@@ -32,7 +32,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
@@ -420,6 +422,17 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
         SummaryRow("Shape", settings.shapeKind.name)
         SummaryRow("Fold count", "${settings.foldCount}$orientationSuffix")
         SummaryRow("Invert colors", if (settings.invertColors) "On" else "Off")
+        SummaryRow("Colorize", if (settings.colorizeEnabled) "${settings.colorizeHue.toInt()}°" else "Off")
+        SummaryRow("Distortion", if (settings.distortionEnabled)
+            "${(settings.distortionAmplitude * 100).toInt()}% @ ${String.format("%.1f", settings.distortionFrequency)}"
+        else "Off")
+        val partyLine = buildString {
+            append("Party: ${if (settings.partyEnabled) "on" else "off"}")
+            append(" | Random: ${if (settings.randomEnabled) "on" else "off"}")
+            if (settings.partyEnabled || settings.randomEnabled)
+                append(" | ${(settings.partyIntensity * 100).toInt()}%")
+        }
+        SummaryRow("Auto", partyLine)
         SummaryRow("Frame shape", settings.frameShape.name)
         Row(
             modifier          = Modifier.fillMaxWidth(),
@@ -553,6 +566,9 @@ private fun ExportKaleidoOverrideContent(
         }
 
         Spacer(Modifier.height(12.dp))
+        Text("Effects", color = NeonCyan, fontSize = 12.sp, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(4.dp))
+
         Row(
             modifier          = Modifier
                 .fillMaxWidth()
@@ -565,6 +581,183 @@ private fun ExportKaleidoOverrideContent(
                 checked         = settings.invertColors,
                 onCheckedChange = { onUpdate(settings.copy(invertColors = it)) },
             )
+        }
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(colorizeEnabled = !settings.colorizeEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Colorize", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked         = settings.colorizeEnabled,
+                onCheckedChange = { onUpdate(settings.copy(colorizeEnabled = it)) },
+            )
+        }
+
+        if (settings.colorizeEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val swatchColor = run {
+                    val hsv = floatArrayOf(settings.colorizeHue, 1f, 1f)
+                    Color(android.graphics.Color.HSVToColor(hsv))
+                }
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(swatchColor)
+                        .border(1.dp, Color(0x44FFFFFF), CircleShape),
+                )
+                Spacer(Modifier.width(8.dp))
+                Slider(
+                    value         = settings.colorizeHue,
+                    onValueChange = { onUpdate(settings.copy(colorizeHue = it)) },
+                    valueRange    = 0f..360f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${settings.colorizeHue.toInt()}°",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(distortionEnabled = !settings.distortionEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Distortion", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked         = settings.distortionEnabled,
+                onCheckedChange = { onUpdate(settings.copy(distortionEnabled = it)) },
+            )
+        }
+
+        if (settings.distortionEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Amp", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+                Slider(
+                    value         = settings.distortionAmplitude,
+                    onValueChange = { onUpdate(settings.copy(distortionAmplitude = it)) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${(settings.distortionAmplitude * 100).toInt()}%",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Freq", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+                Slider(
+                    value         = settings.distortionFrequency,
+                    onValueChange = { onUpdate(settings.copy(distortionFrequency = it)) },
+                    valueRange    = 0.5f..8f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = String.format("%.1f", settings.distortionFrequency),
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+        }
+
+        // ── Auto: Party + Random ──────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(partyEnabled = !settings.partyEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Party mode",
+                color    = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked         = settings.partyEnabled,
+                onCheckedChange = { onUpdate(settings.copy(partyEnabled = it)) },
+            )
+        }
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(randomEnabled = !settings.randomEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Random mode",
+                color    = Color.White,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked         = settings.randomEnabled,
+                onCheckedChange = { onUpdate(settings.copy(randomEnabled = it)) },
+            )
+        }
+
+        if (settings.partyEnabled || settings.randomEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Intensity",
+                    color    = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(64.dp),
+                )
+                Slider(
+                    value         = settings.partyIntensity,
+                    onValueChange = { onUpdate(settings.copy(partyIntensity = it)) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${(settings.partyIntensity * 100).toInt()}%",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
         }
     }
 }

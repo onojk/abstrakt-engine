@@ -226,12 +226,42 @@ internal object Shaders {
         #version 300 es
         precision mediump float;
         uniform sampler2D u_painterTexture;
-        uniform int u_invert_colors;
+        uniform int   u_invert_colors;
+        uniform int   u_colorize_enabled;
+        uniform float u_colorize_hue;          // degrees 0..360
+        uniform int   u_distortion_enabled;
+        uniform float u_distortion_amplitude;  // 0..1
+        uniform float u_distortion_frequency;  // 0.5..8.0
+        uniform float u_time;
         in  vec2 v_uv;
         out vec4 fragColor;
+
+        vec3 hsv2rgb(float h, float s, float v) {
+            float c  = v * s;
+            float h6 = h / 60.0;
+            float x  = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
+            vec3 rgb;
+            if      (h6 < 1.0) rgb = vec3(c, x, 0.0);
+            else if (h6 < 2.0) rgb = vec3(x, c, 0.0);
+            else if (h6 < 3.0) rgb = vec3(0.0, c, x);
+            else if (h6 < 4.0) rgb = vec3(0.0, x, c);
+            else if (h6 < 5.0) rgb = vec3(x, 0.0, c);
+            else               rgb = vec3(c, 0.0, x);
+            return rgb + vec3(v - c);
+        }
+
         void main() {
-            vec4 c = texture(u_painterTexture, v_uv);
-            if (u_invert_colors == 1) c.rgb = vec3(1.0) - c.rgb;
+            vec2 uv = v_uv;
+            if (u_distortion_enabled == 1) {
+                float freq = u_distortion_frequency;
+                float waveU = sin(uv.y * freq * 6.28318 + u_time * freq * 1.5);
+                float waveV = sin(uv.x * freq * 6.28318 + u_time * freq * 1.2);
+                uv.x += waveU * u_distortion_amplitude * 0.05;
+                uv.y += waveV * u_distortion_amplitude * 0.05;
+            }
+            vec4 c = texture(u_painterTexture, uv);
+            if (u_invert_colors == 1)    c.rgb  = vec3(1.0) - c.rgb;
+            if (u_colorize_enabled == 1) c.rgb *= hsv2rgb(u_colorize_hue, 1.0, 1.0);
             fragColor = c;
         }
     """.trimIndent()

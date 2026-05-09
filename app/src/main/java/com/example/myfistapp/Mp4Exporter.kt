@@ -48,6 +48,14 @@ class Mp4Exporter(
     private val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
     private val kaleidoShapeKind: ShapeKind = ShapeKind.Cylinder,
     private val invertColors: Boolean = false,
+    private val colorizeEnabled: Boolean = false,
+    private val colorizeHue: Float = 0f,
+    private val distortionEnabled: Boolean = false,
+    private val distortionAmplitude: Float = 0.3f,
+    private val distortionFrequency: Float = 2.0f,
+    private val partyEnabled: Boolean = false,
+    private val randomEnabled: Boolean = false,
+    private val partyIntensity: Float = 0.5f,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -175,7 +183,19 @@ class Mp4Exporter(
         renderer.frameShape              = kaleidoFrameShape
         renderer.frameColorArgb          = kaleidoFrameColorArgb
         renderer.setShapeKind(kaleidoShapeKind)
-        renderer.invertColors = invertColors
+        renderer.invertColors    = invertColors
+        renderer.colorizeEnabled      = colorizeEnabled
+        renderer.colorizeHue          = colorizeHue
+        renderer.distortionEnabled    = distortionEnabled
+        renderer.distortionAmplitude  = distortionAmplitude
+        renderer.distortionFrequency  = distortionFrequency
+
+        val exportPartyEngine  = PartyEngine  { r -> applyRandomChangeToRenderer(renderer, r) }
+        exportPartyEngine.enabled   = partyEnabled
+        exportPartyEngine.intensity = partyIntensity
+        val exportRandomEngine = RandomEngine { r -> applyRandomChangeToRenderer(renderer, r) }
+        exportRandomEngine.enabled   = randomEnabled
+        exportRandomEngine.intensity = partyIntensity
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -245,6 +265,9 @@ class Mp4Exporter(
                     audioSnapshot = snap,
                     mode          = exportMode,
                 )
+
+                if (snap.isBeat) exportPartyEngine.onBeat()
+                exportRandomEngine.tickWithVideoTime(presentationTimeUs / 1000L)
 
                 EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeUs * 1000L)
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)

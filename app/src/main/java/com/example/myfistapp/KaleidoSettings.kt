@@ -16,6 +16,14 @@ data class KaleidoSettings(
     val zoomMultiplier: Float = 1.0f,
     val shapeKind: ShapeKind = ShapeKind.Cylinder,
     val invertColors: Boolean = false,
+    val colorizeEnabled: Boolean = false,
+    val colorizeHue: Float = 0f,        // degrees 0..360
+    val distortionEnabled: Boolean = false,
+    val distortionAmplitude: Float = 0.3f,  // 0..1
+    val distortionFrequency: Float = 2.0f,  // 0.5..8.0
+    val partyEnabled: Boolean = false,
+    val randomEnabled: Boolean = false,
+    val partyIntensity: Float = 0.5f,       // shared by both engines; 0..1
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

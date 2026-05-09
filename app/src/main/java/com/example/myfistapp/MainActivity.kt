@@ -21,9 +21,11 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,9 +53,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -101,6 +106,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myfistapp.audio.AudioFile
 import com.example.myfistapp.audio.StreamingAnalyzer
 import com.example.myfistapp.audio.loadAndAnalyze
+import com.example.myfistapp.audio.snapshotAt
 import com.example.myfistapp.gl.AbstraktGLSurfaceView
 import com.example.myfistapp.gl.GlVizMode
 import com.example.myfistapp.gl.Painter
@@ -224,6 +230,13 @@ private fun VisualizerScreen() {
         }
     }
 
+    val partyEngine  = remember { PartyEngine  { r -> applyRandomChangeToView(glView, r) } }
+    val randomEngine = remember { RandomEngine { r -> applyRandomChangeToView(glView, r) } }
+    val engineScope  = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) { randomEngine.start(engineScope) }
+    DisposableEffect(Unit) { onDispose { randomEngine.stop() } }
+
     LaunchedEffect(audioFile?.uri) {
         val af = audioFile ?: return@LaunchedEffect
         isPlaying = false
@@ -244,32 +257,57 @@ private fun VisualizerScreen() {
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
             val dur = audioFile?.durationMs ?: 0L
-            if (dur > 0) playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
+            if (dur > 0) {
+                playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
+                val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
+                if (snap?.isBeat == true) partyEngine.onBeat()
+            }
             delay(16L)
         }
     }
 
-    // Push global fold count and square-rotation lock to the GL renderer whenever they change.
-    LaunchedEffect(kaleidoSettings.foldCount) {
+    // Push all kaleido settings to the GL renderer whenever any field changes.
+    // Single effect ensures every setting is re-applied atomically — prevents stale
+    // uniforms when one setting changes and another (e.g. invertColors) is skipped.
+    LaunchedEffect(kaleidoSettings) {
         glView.setFoldCount(kaleidoSettings.foldCount)
-    }
-    LaunchedEffect(kaleidoSettings.squareRotationLocked) {
         glView.setSquareRotationLocked(kaleidoSettings.squareRotationLocked)
-    }
-    LaunchedEffect(kaleidoSettings.frameShape) {
         glView.setFrameShape(kaleidoSettings.frameShape)
-    }
-    LaunchedEffect(kaleidoSettings.frameColorArgb) {
         glView.setFrameColorArgb(kaleidoSettings.frameColorArgb)
-    }
-    LaunchedEffect(kaleidoSettings.zoomMultiplier) {
         glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
-    }
-    LaunchedEffect(kaleidoSettings.shapeKind) {
         glView.setShapeKind(kaleidoSettings.shapeKind)
-    }
-    LaunchedEffect(kaleidoSettings.invertColors) {
         glView.setInvertColors(kaleidoSettings.invertColors)
+        glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled)
+        glView.setColorizeHue(kaleidoSettings.colorizeHue)
+        glView.setDistortionEnabled(kaleidoSettings.distortionEnabled)
+        glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
+        glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
+    }
+
+    LaunchedEffect(kaleidoSettings.partyEnabled)   { partyEngine.enabled   = kaleidoSettings.partyEnabled }
+    LaunchedEffect(kaleidoSettings.randomEnabled)  { randomEngine.enabled  = kaleidoSettings.randomEnabled }
+    LaunchedEffect(kaleidoSettings.partyIntensity) {
+        partyEngine.intensity  = kaleidoSettings.partyIntensity
+        randomEngine.intensity = kaleidoSettings.partyIntensity
+    }
+
+    // When both engines turn off, restore all saved settings to renderer.
+    // LaunchedEffect(kaleidoSettings) already does this atomically on any setting change,
+    // but the explicit re-apply here makes the intent clear.
+    LaunchedEffect(kaleidoSettings.partyEnabled, kaleidoSettings.randomEnabled) {
+        if (!kaleidoSettings.partyEnabled && !kaleidoSettings.randomEnabled) {
+            glView.setShapeKind(kaleidoSettings.shapeKind)
+            glView.setFoldCount(kaleidoSettings.foldCount)
+            glView.setFrameShape(kaleidoSettings.frameShape)
+            glView.setFrameColorArgb(kaleidoSettings.frameColorArgb)
+            glView.setInvertColors(kaleidoSettings.invertColors)
+            glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled)
+            glView.setColorizeHue(kaleidoSettings.colorizeHue)
+            glView.setDistortionEnabled(kaleidoSettings.distortionEnabled)
+            glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
+            glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
+            glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
+        }
     }
 
     val livePulse = remember { Animatable(0.4f) }
@@ -284,7 +322,9 @@ private fun VisualizerScreen() {
                 }
             }
             while (true) {
-                glView.setLiveSnapshot(micAnalyzer.streamingSnapshot())
+                val micSnap = micAnalyzer.streamingSnapshot()
+                glView.setLiveSnapshot(micSnap)
+                if (micSnap.isBeat) partyEngine.onBeat()
                 delay(16L)
             }
         } else {
@@ -1054,6 +1094,14 @@ private fun VisualizerScreen() {
                 onFrameColorChange           = { kaleidoVm.setFrameColorArgb(it) },
                 onZoomMultiplierChange       = { kaleidoVm.setZoomMultiplier(it) },
                 onResetZoom                  = { kaleidoVm.resetZoomMultiplier() },
+                onColorizeEnabledChange      = { kaleidoVm.setColorizeEnabled(it) },
+                onColorizeHueChange          = { kaleidoVm.setColorizeHue(it) },
+                onDistortionEnabledChange    = { kaleidoVm.setDistortionEnabled(it) },
+                onDistortionAmplitudeChange  = { kaleidoVm.setDistortionAmplitude(it) },
+                onDistortionFrequencyChange  = { kaleidoVm.setDistortionFrequency(it) },
+                onPartyEnabledChange         = { kaleidoVm.setPartyEnabled(it) },
+                onRandomEnabledChange        = { kaleidoVm.setRandomEnabled(it) },
+                onPartyIntensityChange       = { kaleidoVm.setPartyIntensity(it) },
             )
         }
     }
@@ -1233,6 +1281,23 @@ private fun GlCanvas(
 
 // ── Kaleido settings sheet content ────────────────────────────────────────────
 
+@Composable
+private fun SettingsSectionHeader(title: String) {
+    Spacer(Modifier.height(12.dp))
+    Text(
+        text          = title.uppercase(),
+        style         = MaterialTheme.typography.labelMedium,
+        color         = NeonCyan,
+        letterSpacing = 1.5.sp,
+    )
+    Spacer(Modifier.height(4.dp))
+    Box(
+        Modifier.fillMaxWidth().height(1.dp)
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+    )
+    Spacer(Modifier.height(8.dp))
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KaleidoSettingsContent(
@@ -1245,21 +1310,31 @@ private fun KaleidoSettingsContent(
     onFrameColorChange: (Long) -> Unit,
     onZoomMultiplierChange: (Float) -> Unit,
     onResetZoom: () -> Unit,
+    onColorizeEnabledChange: (Boolean) -> Unit,
+    onColorizeHueChange: (Float) -> Unit,
+    onDistortionEnabledChange: (Boolean) -> Unit,
+    onDistortionAmplitudeChange: (Float) -> Unit,
+    onDistortionFrequencyChange: (Float) -> Unit,
+    onPartyEnabledChange: (Boolean) -> Unit,
+    onRandomEnabledChange: (Boolean) -> Unit,
+    onPartyIntensityChange: (Float) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
-            .padding(horizontal = 24.dp, vertical = 8.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
     ) {
         Text(
             "Kaleido Settings",
             style = MaterialTheme.typography.titleLarge,
             color = NeonCyan,
         )
-        Spacer(Modifier.height(16.dp))
-        Text("Shape", style = MaterialTheme.typography.bodyLarge, color = Color.White)
-        Spacer(Modifier.height(8.dp))
+
+        // ── GEOMETRY ─────────────────────────────────────────────────────────
+        SettingsSectionHeader("Geometry")
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding        = PaddingValues(horizontal = 4.dp),
@@ -1275,17 +1350,19 @@ private fun KaleidoSettingsContent(
                 )
             }
         }
-        Spacer(Modifier.height(16.dp))
+
+        // ── KALEIDOSCOPE ─────────────────────────────────────────────────────
+        SettingsSectionHeader("Kaleidoscope")
         Text(
             "Fold count: ${settings.foldCount}",
             style = MaterialTheme.typography.bodyLarge,
             color = Color.White,
         )
         Slider(
-            value       = settings.foldCount.toFloat(),
+            value         = settings.foldCount.toFloat(),
             onValueChange = { onFoldCountChange(it.toInt()) },
-            valueRange  = 2f..24f,
-            steps       = 21,
+            valueRange    = 2f..24f,
+            steps         = 21,
         )
         Text(
             text  = foldCountHint(settings.foldCount),
@@ -1294,38 +1371,34 @@ private fun KaleidoSettingsContent(
         )
 
         if (settings.foldCount == 4) {
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Orientation",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White,
-            )
+            Spacer(Modifier.height(12.dp))
+            Text("Orientation", style = MaterialTheme.typography.bodyLarge, color = Color.White)
             Spacer(Modifier.height(8.dp))
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilterChip(
-                    selected = !settings.squareRotationLocked,
-                    onClick  = { onSquareRotationLockedChange(false) },
-                    label    = { Text("Diamond") },
+                    selected    = !settings.squareRotationLocked,
+                    onClick     = { onSquareRotationLockedChange(false) },
+                    label       = { Text("Diamond") },
                     leadingIcon = if (!settings.squareRotationLocked) {
                         { Icon(Icons.Default.Check, contentDescription = null) }
                     } else null,
-                    modifier = Modifier.weight(1f),
+                    modifier    = Modifier.weight(1f),
                 )
                 FilterChip(
-                    selected = settings.squareRotationLocked,
-                    onClick  = { onSquareRotationLockedChange(true) },
-                    label    = { Text("Square") },
+                    selected    = settings.squareRotationLocked,
+                    onClick     = { onSquareRotationLockedChange(true) },
+                    label       = { Text("Square") },
                     leadingIcon = if (settings.squareRotationLocked) {
                         { Icon(Icons.Default.Check, contentDescription = null) }
                     } else null,
-                    modifier = Modifier.weight(1f),
+                    modifier    = Modifier.weight(1f),
                 )
             }
             Text(
-                text = if (settings.squareRotationLocked)
+                text     = if (settings.squareRotationLocked)
                     "Pattern aligned to vertical and horizontal axes"
                 else
                     "Pattern aligned to diagonal axes (default)",
@@ -1335,38 +1408,45 @@ private fun KaleidoSettingsContent(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("Zoom", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Spacer(Modifier.height(4.dp))
         Row(
-            modifier          = Modifier
-                .fillMaxWidth()
-                .clickable { onInvertColorsChange(!settings.invertColors) }
-                .padding(vertical = 4.dp),
+            modifier          = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Invert colors",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White,
-                )
-                Text(
-                    "Flip RGB on painter texture (white↔black, hues inverted)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked         = settings.invertColors,
-                onCheckedChange = { onInvertColorsChange(it) },
+            Text(
+                text       = "${(settings.zoomMultiplier * 100).toInt()}%",
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
             )
+            Slider(
+                value         = settings.zoomMultiplier,
+                onValueChange = { onZoomMultiplierChange(it) },
+                valueRange    = 0.5f..1.5f,
+                steps         = 19,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            TextButton(onClick = onResetZoom) {
+                Text("Reset", color = NeonCyan)
+            }
         }
-
-        Spacer(Modifier.height(16.dp))
         Text(
-            "Frame shape",
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color.White,
+            text  = when {
+                settings.zoomMultiplier > 1.05f -> "Zoomed in (less border)"
+                settings.zoomMultiplier < 0.95f -> "Zoomed out (more border)"
+                else                            -> "Default"
+            },
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
         )
+
+        // ── FRAME ────────────────────────────────────────────────────────────
+        SettingsSectionHeader("Frame")
+        Text("Frame shape", style = MaterialTheme.typography.bodyLarge, color = Color.White)
         Spacer(Modifier.height(8.dp))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1384,7 +1464,7 @@ private fun KaleidoSettingsContent(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
         Text("Frame color", style = MaterialTheme.typography.bodyLarge, color = Color.White)
         Spacer(Modifier.height(8.dp))
 
@@ -1430,44 +1510,269 @@ private fun KaleidoSettingsContent(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Zoom", style = MaterialTheme.typography.bodyLarge, color = Color.White)
-        Spacer(Modifier.height(8.dp))
+        // ── EFFECTS ──────────────────────────────────────────────────────────
+        SettingsSectionHeader("Effects")
+
+        // Invert
         Row(
-            modifier          = Modifier.fillMaxWidth(),
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onInvertColorsChange(!settings.invertColors) }
+                .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text       = "${(settings.zoomMultiplier * 100).toInt()}%",
-                style      = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color      = Color.White,
-                modifier   = Modifier.width(48.dp),
-            )
-            Slider(
-                value         = settings.zoomMultiplier,
-                onValueChange = { onZoomMultiplierChange(it) },
-                valueRange    = 0.5f..1.5f,
-                steps         = 19,
-                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
-            )
-            TextButton(onClick = onResetZoom) {
-                Text("Reset", color = NeonCyan)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Invert colors", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Flip RGB on painter texture (white↔black, hues inverted)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.invertColors, onCheckedChange = { onInvertColorsChange(it) })
+        }
+
+        // Colorize
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onColorizeEnabledChange(!settings.colorizeEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Colorize", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Tint output with a chosen hue",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.colorizeEnabled, onCheckedChange = { onColorizeEnabledChange(it) })
+        }
+
+        if (settings.colorizeEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(hsvToComposeColor(settings.colorizeHue, 1f, 1f))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                )
+                Spacer(Modifier.width(12.dp))
+                Slider(
+                    value         = settings.colorizeHue,
+                    onValueChange = { onColorizeHueChange(it) },
+                    valueRange    = 0f..360f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${settings.colorizeHue.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp).padding(start = 8.dp),
+                )
             }
         }
-        Text(
-            text  = when {
-                settings.zoomMultiplier > 1.05f -> "Zoomed in (less border)"
-                settings.zoomMultiplier < 0.95f -> "Zoomed out (more border)"
-                else                            -> "Default"
-            },
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
 
-        Spacer(Modifier.height(32.dp))
+        // Distortion
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onDistortionEnabledChange(!settings.distortionEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Distortion", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Stretch pixels with animated waves",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.distortionEnabled,
+                onCheckedChange = { onDistortionEnabledChange(it) },
+            )
+        }
+
+        if (settings.distortionEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Amp",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(48.dp),
+                )
+                Slider(
+                    value         = settings.distortionAmplitude,
+                    onValueChange = { onDistortionAmplitudeChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.distortionAmplitude * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Freq",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(48.dp),
+                )
+                Slider(
+                    value         = settings.distortionFrequency,
+                    onValueChange = { onDistortionFrequencyChange(it) },
+                    valueRange    = 0.5f..8f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = String.format("%.1f", settings.distortionFrequency),
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+        }
+
+        // ── PARTY / RANDOM ───────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onPartyEnabledChange(!settings.partyEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector        = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint               = MaterialTheme.colorScheme.primary,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Party mode",
+                        style      = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color      = Color.White,
+                    )
+                }
+                Text(
+                    text  = "Random changes triggered by music beats",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.partyEnabled, onCheckedChange = { onPartyEnabledChange(it) })
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onRandomEnabledChange(!settings.randomEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector        = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint               = MaterialTheme.colorScheme.primary,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Random mode",
+                        style      = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color      = Color.White,
+                    )
+                }
+                Text(
+                    text  = "Random changes on a timer (no music required)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.randomEnabled, onCheckedChange = { onRandomEnabledChange(it) })
+        }
+
+        if (settings.partyEnabled || settings.randomEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text     = "Intensity",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(72.dp),
+                )
+                Slider(
+                    value         = settings.partyIntensity,
+                    onValueChange = { onPartyIntensityChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.partyIntensity * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+            Text(
+                text     = when {
+                    settings.partyIntensity < 0.25f -> "Subtle"
+                    settings.partyIntensity < 0.55f -> "Lively"
+                    settings.partyIntensity < 0.85f -> "Wild"
+                    else                            -> "Maximum chaos"
+                },
+                style    = MaterialTheme.typography.bodySmall,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        Spacer(Modifier.height(96.dp))
     }
+}
+
+private fun hsvToComposeColor(hue: Float, saturation: Float, value: Float): Color {
+    val hsv = floatArrayOf(hue, saturation, value)
+    return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
 private fun foldCountHint(count: Int): String = when (count) {

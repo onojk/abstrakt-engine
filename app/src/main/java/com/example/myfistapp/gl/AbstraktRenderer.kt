@@ -100,7 +100,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var shapeFboW        = 0
     private var shapeFboH        = 0
     @Volatile var zoomMultiplier  = 1.0f
-    @Volatile var invertColors    = false
+    @Volatile var invertColors      = false
+    @Volatile var colorizeEnabled      = false
+    @Volatile var colorizeHue          = 0f        // degrees 0..360
+    @Volatile var distortionEnabled    = false
+    @Volatile var distortionAmplitude  = 0.3f      // 0..1
+    @Volatile var distortionFrequency  = 2.0f      // 0.5..8.0
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -784,7 +789,13 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         cProg.use()
         cProg.setMat4("u_mvp", mvpM)
         cProg.setInt("u_painterTexture", 0)
-        cProg.setInt("u_invert_colors", if (invertColors) 1 else 0)
+        cProg.setInt("u_invert_colors",    if (invertColors)    1 else 0)
+        cProg.setInt("u_colorize_enabled",    if (colorizeEnabled)    1 else 0)
+        cProg.setFloat("u_colorize_hue",      colorizeHue)
+        cProg.setInt("u_distortion_enabled",  if (distortionEnabled)  1 else 0)
+        cProg.setFloat("u_distortion_amplitude", distortionAmplitude)
+        cProg.setFloat("u_distortion_frequency", distortionFrequency)
+        cProg.setFloat("u_time",              timeSec)
 
         loadShapeMeshIfNeeded()
         GLES30.glBindVertexArray(shapeVao)

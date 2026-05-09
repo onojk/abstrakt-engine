@@ -24,6 +24,14 @@ object KaleidoKeys {
     val ZOOM_MULTIPLIER   = floatPreferencesKey("zoom_multiplier")
     val SHAPE_KIND        = stringPreferencesKey("shape_kind")
     val INVERT_COLORS     = booleanPreferencesKey("invert_colors")
+    val COLORIZE_ENABLED       = booleanPreferencesKey("colorize_enabled")
+    val COLORIZE_HUE           = floatPreferencesKey("colorize_hue")
+    val DISTORTION_ENABLED     = booleanPreferencesKey("distortion_enabled")
+    val DISTORTION_AMPLITUDE   = floatPreferencesKey("distortion_amplitude")
+    val DISTORTION_FREQUENCY   = floatPreferencesKey("distortion_frequency")
+    val PARTY_ENABLED          = booleanPreferencesKey("party_enabled")
+    val RANDOM_ENABLED         = booleanPreferencesKey("random_enabled")
+    val PARTY_INTENSITY        = floatPreferencesKey("party_intensity")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -41,6 +49,14 @@ class KaleidoSettingsStore(private val context: Context) {
                 ?.let { runCatching { ShapeKind.valueOf(it) }.getOrNull() }
                 ?: ShapeKind.Cylinder,
             invertColors         = prefs[KaleidoKeys.INVERT_COLORS] ?: false,
+            colorizeEnabled      = prefs[KaleidoKeys.COLORIZE_ENABLED] ?: false,
+            colorizeHue          = (prefs[KaleidoKeys.COLORIZE_HUE] ?: 0f).coerceIn(0f, 360f),
+            distortionEnabled    = prefs[KaleidoKeys.DISTORTION_ENABLED] ?: false,
+            distortionAmplitude  = (prefs[KaleidoKeys.DISTORTION_AMPLITUDE] ?: 0.3f).coerceIn(0f, 1f),
+            distortionFrequency  = (prefs[KaleidoKeys.DISTORTION_FREQUENCY] ?: 2.0f).coerceIn(0.5f, 8.0f),
+            partyEnabled         = prefs[KaleidoKeys.PARTY_ENABLED] ?: false,
+            randomEnabled        = prefs[KaleidoKeys.RANDOM_ENABLED] ?: false,
+            partyIntensity       = (prefs[KaleidoKeys.PARTY_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
         )
     }
 
@@ -84,5 +100,41 @@ class KaleidoSettingsStore(private val context: Context) {
         context.kaleidoDataStore.edit { prefs ->
             prefs[KaleidoKeys.INVERT_COLORS] = value
         }
+    }
+
+    suspend fun setColorizeEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { prefs ->
+            prefs[KaleidoKeys.COLORIZE_ENABLED] = value
+        }
+    }
+
+    suspend fun setColorizeHue(value: Float) {
+        context.kaleidoDataStore.edit { prefs ->
+            prefs[KaleidoKeys.COLORIZE_HUE] = value.coerceIn(0f, 360f)
+        }
+    }
+
+    suspend fun setDistortionEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_ENABLED] = value }
+    }
+
+    suspend fun setDistortionAmplitude(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_AMPLITUDE] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setDistortionFrequency(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_FREQUENCY] = value.coerceIn(0.5f, 8.0f) }
+    }
+
+    suspend fun setPartyEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PARTY_ENABLED] = value }
+    }
+
+    suspend fun setRandomEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.RANDOM_ENABLED] = value }
+    }
+
+    suspend fun setPartyIntensity(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PARTY_INTENSITY] = value.coerceIn(0f, 1f) }
     }
 }

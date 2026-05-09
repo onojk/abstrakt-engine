@@ -62,6 +62,11 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun triggerPainterStatsDump()                { renderer.dumpPainterStatsOnNextFrame = true }
     fun setShapeKind(kind: ShapeKind)            { queueEvent { renderer.setShapeKind(kind) } }
     fun setInvertColors(value: Boolean)          { queueEvent { renderer.invertColors = value } }
+    fun setColorizeEnabled(value: Boolean)        { queueEvent { renderer.colorizeEnabled = value } }
+    fun setColorizeHue(value: Float)              { queueEvent { renderer.colorizeHue = value } }
+    fun setDistortionEnabled(value: Boolean)      { queueEvent { renderer.distortionEnabled = value } }
+    fun setDistortionAmplitude(value: Float)      { queueEvent { renderer.distortionAmplitude = value } }
+    fun setDistortionFrequency(value: Float)      { queueEvent { renderer.distortionFrequency = value } }
     fun setZoomMultiplier(value: Float)          { queueEvent { renderer.zoomMultiplier = value } }
     val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
 }

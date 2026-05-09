@@ -54,4 +54,36 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setInvertColors(value: Boolean) {
         viewModelScope.launch { store.setInvertColors(value) }
     }
+
+    fun setColorizeEnabled(value: Boolean) {
+        viewModelScope.launch { store.setColorizeEnabled(value) }
+    }
+
+    fun setColorizeHue(value: Float) {
+        viewModelScope.launch { store.setColorizeHue(value) }
+    }
+
+    fun setDistortionEnabled(value: Boolean) {
+        viewModelScope.launch { store.setDistortionEnabled(value) }
+    }
+
+    fun setDistortionAmplitude(value: Float) {
+        viewModelScope.launch { store.setDistortionAmplitude(value) }
+    }
+
+    fun setDistortionFrequency(value: Float) {
+        viewModelScope.launch { store.setDistortionFrequency(value) }
+    }
+
+    fun setPartyEnabled(value: Boolean) {
+        viewModelScope.launch { store.setPartyEnabled(value) }
+    }
+
+    fun setRandomEnabled(value: Boolean) {
+        viewModelScope.launch { store.setRandomEnabled(value) }
+    }
+
+    fun setPartyIntensity(value: Float) {
+        viewModelScope.launch { store.setPartyIntensity(value) }
+    }
 }

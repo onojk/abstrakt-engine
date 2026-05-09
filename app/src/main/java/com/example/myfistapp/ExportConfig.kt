@@ -11,6 +11,14 @@ data class ExportConfig(
     val kaleidoFrameColorArgb: Long = 0xFFFFFFFFL,
     val kaleidoShapeKind: ShapeKind = ShapeKind.Cylinder,
     val invertColors: Boolean = false,
+    val colorizeEnabled: Boolean = false,
+    val colorizeHue: Float = 0f,
+    val distortionEnabled: Boolean = false,
+    val distortionAmplitude: Float = 0.3f,
+    val distortionFrequency: Float = 2.0f,
+    val partyEnabled: Boolean = false,
+    val randomEnabled: Boolean = false,
+    val partyIntensity: Float = 0.5f,
 )
 
 sealed class AudioSource {
