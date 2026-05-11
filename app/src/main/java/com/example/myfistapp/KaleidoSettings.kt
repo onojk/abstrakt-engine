@@ -1,5 +1,19 @@
 package com.example.myfistapp
 
+enum class LockableParam {
+    SHAPE_KIND,
+    FOLD_COUNT,
+    FRAME_SHAPE,
+    FRAME_COLOR,
+    INVERT_COLORS,
+    COLORIZE_ENABLED,
+    COLORIZE_HUE,
+    DISTORTION_ENABLED,
+    DISTORTION_AMPLITUDE,
+    DISTORTION_FREQUENCY,
+    ZOOM_MULTIPLIER,
+}
+
 enum class FrameShape {
     None, Circle, Square, Rounded, Hexagon, Octagon, Flower, Star
 }
@@ -24,6 +38,7 @@ data class KaleidoSettings(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,       // shared by both engines; 0..1
+    val lockedParams: Set<LockableParam> = emptySet(),
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

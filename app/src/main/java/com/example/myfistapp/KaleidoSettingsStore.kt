@@ -32,6 +32,7 @@ object KaleidoKeys {
     val PARTY_ENABLED          = booleanPreferencesKey("party_enabled")
     val RANDOM_ENABLED         = booleanPreferencesKey("random_enabled")
     val PARTY_INTENSITY        = floatPreferencesKey("party_intensity")
+    val LOCKED_PARAMS          = stringPreferencesKey("locked_params")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -57,6 +58,12 @@ class KaleidoSettingsStore(private val context: Context) {
             partyEnabled         = prefs[KaleidoKeys.PARTY_ENABLED] ?: false,
             randomEnabled        = prefs[KaleidoKeys.RANDOM_ENABLED] ?: false,
             partyIntensity       = (prefs[KaleidoKeys.PARTY_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
+            lockedParams         = prefs[KaleidoKeys.LOCKED_PARAMS]
+                ?.split(",")
+                ?.filter { it.isNotBlank() }
+                ?.mapNotNull { runCatching { LockableParam.valueOf(it) }.getOrNull() }
+                ?.toSet()
+                ?: emptySet(),
         )
     }
 
@@ -136,5 +143,11 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setPartyIntensity(value: Float) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.PARTY_INTENSITY] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setLockedParams(value: Set<LockableParam>) {
+        context.kaleidoDataStore.edit {
+            it[KaleidoKeys.LOCKED_PARAMS] = value.joinToString(",") { p -> p.name }
+        }
     }
 }

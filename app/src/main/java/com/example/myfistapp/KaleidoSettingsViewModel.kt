@@ -86,4 +86,10 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
     fun setPartyIntensity(value: Float) {
         viewModelScope.launch { store.setPartyIntensity(value) }
     }
+
+    fun toggleLock(param: LockableParam) {
+        val current = settings.value.lockedParams
+        val updated = if (param in current) current - param else current + param
+        viewModelScope.launch { store.setLockedParams(updated) }
+    }
 }

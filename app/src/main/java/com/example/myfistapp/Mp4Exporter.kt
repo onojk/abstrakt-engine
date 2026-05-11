@@ -56,6 +56,7 @@ class Mp4Exporter(
     private val partyEnabled: Boolean = false,
     private val randomEnabled: Boolean = false,
     private val partyIntensity: Float = 0.5f,
+    private val lockedParams: Set<LockableParam> = emptySet(),
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -190,10 +191,10 @@ class Mp4Exporter(
         renderer.distortionAmplitude  = distortionAmplitude
         renderer.distortionFrequency  = distortionFrequency
 
-        val exportPartyEngine  = PartyEngine  { r -> applyRandomChangeToRenderer(renderer, r) }
+        val exportPartyEngine  = PartyEngine  { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
         exportPartyEngine.enabled   = partyEnabled
         exportPartyEngine.intensity = partyIntensity
-        val exportRandomEngine = RandomEngine { r -> applyRandomChangeToRenderer(renderer, r) }
+        val exportRandomEngine = RandomEngine { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
         exportRandomEngine.enabled   = randomEnabled
         exportRandomEngine.intensity = partyIntensity
 

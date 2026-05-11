@@ -215,6 +215,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     partyEnabled                 = kaleido.partyEnabled,
                     randomEnabled                = kaleido.randomEnabled,
                     partyIntensity               = kaleido.partyIntensity,
+                    lockedParams                 = kaleido.lockedParams,
                 )
                 val result = exporter.export { fraction, phase ->
                     _progressValue.value = fraction

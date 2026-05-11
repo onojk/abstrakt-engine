@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.foundation.background
@@ -124,6 +125,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -231,8 +234,9 @@ private fun VisualizerScreen() {
         }
     }
 
-    val partyEngine  = remember { PartyEngine  { r -> applyRandomChangeToView(glView, r) } }
-    val randomEngine = remember { RandomEngine { r -> applyRandomChangeToView(glView, r) } }
+    val lockedParamsFn: () -> Set<LockableParam> = { kaleidoVm.settings.value.lockedParams }
+    val partyEngine  = remember { PartyEngine  { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
+    val randomEngine = remember { RandomEngine { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
     val engineScope  = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { randomEngine.start(engineScope) }
@@ -1104,6 +1108,7 @@ private fun VisualizerScreen() {
                 onPartyEnabledChange         = { kaleidoVm.setPartyEnabled(it) },
                 onRandomEnabledChange        = { kaleidoVm.setRandomEnabled(it) },
                 onPartyIntensityChange       = { kaleidoVm.setPartyIntensity(it) },
+                onToggleLock                 = { kaleidoVm.toggleLock(it) },
             )
         }
     }
@@ -1302,6 +1307,23 @@ private fun SettingsSectionHeader(title: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun LockIconButton(
+    param: LockableParam,
+    lockedParams: Set<LockableParam>,
+    onToggle: (LockableParam) -> Unit,
+) {
+    val locked = param in lockedParams
+    IconButton(onClick = { onToggle(param) }) {
+        Icon(
+            imageVector        = if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+            contentDescription = if (locked) "Unlock ${param.name}" else "Lock ${param.name}",
+            tint               = if (locked) NeonCyan else DimWhite.copy(alpha = 0.5f),
+            modifier           = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
 private fun KaleidoSettingsContent(
     settings: KaleidoSettings,
     onShapeKindChange: (ShapeKind) -> Unit,
@@ -1320,6 +1342,7 @@ private fun KaleidoSettingsContent(
     onPartyEnabledChange: (Boolean) -> Unit,
     onRandomEnabledChange: (Boolean) -> Unit,
     onPartyIntensityChange: (Float) -> Unit,
+    onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
     val scrollState = rememberScrollState()
@@ -1355,11 +1378,18 @@ private fun KaleidoSettingsContent(
 
         // ── KALEIDOSCOPE ─────────────────────────────────────────────────────
         SettingsSectionHeader("Kaleidoscope")
-        Text(
-            "Fold count: ${settings.foldCount}",
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color.White,
-        )
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Fold count: ${settings.foldCount}",
+                style    = MaterialTheme.typography.bodyLarge,
+                color    = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            LockIconButton(LockableParam.FOLD_COUNT, settings.lockedParams, onToggleLock)
+        }
         Slider(
             value         = settings.foldCount.toFloat(),
             onValueChange = { onFoldCountChange(it.toInt()) },
@@ -1434,6 +1464,7 @@ private fun KaleidoSettingsContent(
             TextButton(onClick = onResetZoom) {
                 Text("Reset", color = NeonCyan)
             }
+            LockIconButton(LockableParam.ZOOM_MULTIPLIER, settings.lockedParams, onToggleLock)
         }
         Text(
             text  = when {
@@ -1580,6 +1611,7 @@ private fun KaleidoSettingsContent(
                     color      = Color.White,
                     modifier   = Modifier.width(48.dp).padding(start = 8.dp),
                 )
+                LockIconButton(LockableParam.COLORIZE_HUE, settings.lockedParams, onToggleLock)
             }
         }
 
@@ -1631,6 +1663,7 @@ private fun KaleidoSettingsContent(
                     color      = Color.White,
                     modifier   = Modifier.width(48.dp),
                 )
+                LockIconButton(LockableParam.DISTORTION_AMPLITUDE, settings.lockedParams, onToggleLock)
             }
             Spacer(Modifier.height(4.dp))
             Row(
@@ -1656,6 +1689,7 @@ private fun KaleidoSettingsContent(
                     color      = Color.White,
                     modifier   = Modifier.width(48.dp),
                 )
+                LockIconButton(LockableParam.DISTORTION_FREQUENCY, settings.lockedParams, onToggleLock)
             }
         }
 

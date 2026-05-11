@@ -32,24 +32,29 @@ private fun randomFrameColorArgb(r: Random): Long {
     return (color.toLong() and 0xFFFFFFFFL) or 0xFF000000L
 }
 
-private val PARAM_COUNT = 11
-
 /**
  * Apply one random parameter change to the live GL view (thread-safe via queueEvent/Volatile).
+ * Skips any parameter whose LockableParam is in the locked set returned by lockedParamsFn.
  */
-fun applyRandomChangeToView(view: AbstraktGLSurfaceView, random: Random) {
-    when (random.nextInt(PARAM_COUNT)) {
-        0  -> view.setShapeKind(ShapeKind.entries.random())
-        1  -> view.setFoldCount(random.nextInt(23) + 2)
-        2  -> view.setFrameShape(FrameShape.entries.random())
-        3  -> view.setFrameColorArgb(randomFrameColorArgb(random))
-        4  -> view.setInvertColors(random.nextBoolean())
-        5  -> view.setColorizeEnabled(random.nextDouble() < 0.7)
-        6  -> view.setColorizeHue(random.nextFloat() * 360f)
-        7  -> view.setDistortionEnabled(random.nextDouble() < 0.6)
-        8  -> view.setDistortionAmplitude(random.nextFloat())
-        9  -> view.setDistortionFrequency(0.5f + random.nextFloat() * 7.5f)
-        10 -> view.setZoomMultiplier(0.5f + random.nextFloat() * 1.0f)
+fun applyRandomChangeToView(
+    view: AbstraktGLSurfaceView,
+    lockedParamsFn: () -> Set<LockableParam>,
+    random: Random,
+) {
+    val available = LockableParam.entries.filter { it !in lockedParamsFn() }
+    if (available.isEmpty()) return
+    when (available[random.nextInt(available.size)]) {
+        LockableParam.SHAPE_KIND           -> view.setShapeKind(ShapeKind.entries.random())
+        LockableParam.FOLD_COUNT           -> view.setFoldCount(random.nextInt(23) + 2)
+        LockableParam.FRAME_SHAPE          -> view.setFrameShape(FrameShape.entries.random())
+        LockableParam.FRAME_COLOR          -> view.setFrameColorArgb(randomFrameColorArgb(random))
+        LockableParam.INVERT_COLORS        -> view.setInvertColors(random.nextBoolean())
+        LockableParam.COLORIZE_ENABLED     -> view.setColorizeEnabled(random.nextDouble() < 0.7)
+        LockableParam.COLORIZE_HUE         -> view.setColorizeHue(random.nextFloat() * 360f)
+        LockableParam.DISTORTION_ENABLED   -> view.setDistortionEnabled(random.nextDouble() < 0.6)
+        LockableParam.DISTORTION_AMPLITUDE -> view.setDistortionAmplitude(random.nextFloat())
+        LockableParam.DISTORTION_FREQUENCY -> view.setDistortionFrequency(0.5f + random.nextFloat() * 7.5f)
+        LockableParam.ZOOM_MULTIPLIER      -> view.setZoomMultiplier(0.5f + random.nextFloat() * 1.0f)
     }
 }
 
@@ -57,18 +62,24 @@ fun applyRandomChangeToView(view: AbstraktGLSurfaceView, random: Random) {
  * Apply one random parameter change directly to the export renderer.
  * Safe to call on the export's single-threaded dispatcher since all fields are @Volatile.
  */
-internal fun applyRandomChangeToRenderer(renderer: AbstraktRenderer, random: Random) {
-    when (random.nextInt(PARAM_COUNT)) {
-        0  -> renderer.setShapeKind(ShapeKind.entries.random())
-        1  -> renderer.foldCount = random.nextInt(23) + 2
-        2  -> renderer.frameShape = FrameShape.entries.random()
-        3  -> renderer.frameColorArgb = randomFrameColorArgb(random)
-        4  -> renderer.invertColors = random.nextBoolean()
-        5  -> renderer.colorizeEnabled = random.nextDouble() < 0.7
-        6  -> renderer.colorizeHue = random.nextFloat() * 360f
-        7  -> renderer.distortionEnabled = random.nextDouble() < 0.6
-        8  -> renderer.distortionAmplitude = random.nextFloat()
-        9  -> renderer.distortionFrequency = 0.5f + random.nextFloat() * 7.5f
-        10 -> renderer.zoomMultiplier = 0.5f + random.nextFloat() * 1.0f
+internal fun applyRandomChangeToRenderer(
+    renderer: AbstraktRenderer,
+    lockedParams: Set<LockableParam>,
+    random: Random,
+) {
+    val available = LockableParam.entries.filter { it !in lockedParams }
+    if (available.isEmpty()) return
+    when (available[random.nextInt(available.size)]) {
+        LockableParam.SHAPE_KIND           -> renderer.setShapeKind(ShapeKind.entries.random())
+        LockableParam.FOLD_COUNT           -> renderer.foldCount = random.nextInt(23) + 2
+        LockableParam.FRAME_SHAPE          -> renderer.frameShape = FrameShape.entries.random()
+        LockableParam.FRAME_COLOR          -> renderer.frameColorArgb = randomFrameColorArgb(random)
+        LockableParam.INVERT_COLORS        -> renderer.invertColors = random.nextBoolean()
+        LockableParam.COLORIZE_ENABLED     -> renderer.colorizeEnabled = random.nextDouble() < 0.7
+        LockableParam.COLORIZE_HUE         -> renderer.colorizeHue = random.nextFloat() * 360f
+        LockableParam.DISTORTION_ENABLED   -> renderer.distortionEnabled = random.nextDouble() < 0.6
+        LockableParam.DISTORTION_AMPLITUDE -> renderer.distortionAmplitude = random.nextFloat()
+        LockableParam.DISTORTION_FREQUENCY -> renderer.distortionFrequency = 0.5f + random.nextFloat() * 7.5f
+        LockableParam.ZOOM_MULTIPLIER      -> renderer.zoomMultiplier = 0.5f + random.nextFloat() * 1.0f
     }
 }
