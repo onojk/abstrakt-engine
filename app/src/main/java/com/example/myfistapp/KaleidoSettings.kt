@@ -1,7 +1,7 @@
 package com.example.myfistapp
 
 enum class FrameShape {
-    None, Circle, Square, Rounded, Hexagon, Octagon, Star
+    None, Circle, Square, Rounded, Hexagon, Octagon, Flower, Star
 }
 
 enum class ShapeKind {

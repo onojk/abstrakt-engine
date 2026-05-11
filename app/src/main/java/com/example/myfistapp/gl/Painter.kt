@@ -6,6 +6,8 @@ enum class Painter(val label: String) {
     PRINT_HEAD("Print"),
     IMAGE("Image"),
     SKIN("Skin"),
+    SPIRAL("Spiral"),
+    PLASMA("Plasma"),
 }
 
 internal data class PainterEntry(
@@ -20,4 +22,6 @@ internal fun allPainters(): List<PainterEntry> = listOf(
     PainterEntry(Painter.PRINT_HEAD,  Shaders.PAINTER_VERT, Shaders.PAINTER_PRINTHEAD_FRAG),
     PainterEntry(Painter.IMAGE,       Shaders.PAINTER_VERT, Shaders.PAINTER_IMAGE_FRAG),
     PainterEntry(Painter.SKIN,        Shaders.PAINTER_VERT, Shaders.PAINTER_SKIN_FRAG),
+    PainterEntry(Painter.SPIRAL,      Shaders.PAINTER_VERT, Shaders.PAINTER_SPIRAL_FRAG),
+    PainterEntry(Painter.PLASMA,      Shaders.PAINTER_VERT, Shaders.PAINTER_PLASMA_FRAG),
 )

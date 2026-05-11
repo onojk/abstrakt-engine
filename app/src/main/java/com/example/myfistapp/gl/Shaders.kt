@@ -363,7 +363,7 @@ internal object Shaders {
     """.trimIndent()
 
     // FRAME_OVERLAY_FRAG — SDF shape mask applied to kaleido FBO output.
-    // Shapes (u_frame_shape): 0=None, 1=Circle, 2=Square, 3=Rounded, 4=Hexagon, 5=Octagon, 6=Star
+    // Shapes (u_frame_shape): 0=None, 1=Circle, 2=Square, 3=Rounded, 4=Hexagon, 5=Octagon, 6=Flower, 7=Star
     // Coordinates normalised to shorter screen dimension (same basis as kaleido shader).
     val FRAME_OVERLAY_FRAG = """
         #version 300 es
@@ -413,6 +413,13 @@ internal object Shaders {
             return length(p) * sign(p.y);
         }
 
+        float sdfFlower(vec2 p, float numPetals, float baseR, float petalAmp) {
+            float angle  = atan(p.y, p.x);
+            float radius = length(p);
+            float petalR = baseR + petalAmp * cos(numPetals * angle);
+            return radius - petalR;
+        }
+
         float sdfStar5(vec2 p, float r, float rf) {
             vec2 k1 = vec2(0.809016994, -0.587785252);
             vec2 k2 = vec2(-k1.x, k1.y);
@@ -443,7 +450,8 @@ internal object Shaders {
             else if (u_frame_shape == 3) sdf = sdfRoundedBox(p, h, h * 0.2);
             else if (u_frame_shape == 4) sdf = sdfHexagon(p, h);
             else if (u_frame_shape == 5) sdf = sdfOctagon(p, h);
-            else if (u_frame_shape == 6) sdf = sdfStar5(p, h, 0.5);
+            else if (u_frame_shape == 6) sdf = sdfFlower(p, 5.0, h * 0.7, h * 0.3);
+            else if (u_frame_shape == 7) sdf = sdfStar5(p, h, 0.5);
 
             float pw   = 1.5 / min(u_resolution.x, u_resolution.y);
             float mask = 1.0 - smoothstep(-pw, pw, sdf);
@@ -715,6 +723,74 @@ internal object Shaders {
             float outA         = min(max(decayedAlpha, lineIntensity * 1.3), 1.0);
 
             fragColor = vec4(u_ribbon_color, outA);
+        }
+    """.trimIndent()
+
+    // Spiral painter: 5-arm color spiral, aspect-corrected for the 4:1 strip.
+    // Arms are hue-mapped and rotate slowly over time.
+    val PAINTER_SPIRAL_FRAG = """
+        #version 300 es
+        precision highp float;
+
+        const float TAU = 6.28318530717959;
+
+        uniform float u_time;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            const float aspect    = 4.0;   // artistic — strip is 16:1 but 4:1 gives denser arms
+            const float arm_count = 5.0;
+
+            vec2  p     = v_uv * 2.0 - 1.0;
+            p.x        *= aspect;
+
+            float r     = length(p);
+            float theta = atan(p.y, p.x);
+
+            float hue        = fract(theta / TAU * arm_count + r * 1.5 - u_time * 0.1);
+            float brightness = clamp(0.7 + 0.3 * (1.0 - r * 0.4), 0.0, 1.0);
+
+            fragColor = vec4(hsv2rgb(vec3(hue, 1.0, brightness)), 1.0);
+        }
+    """.trimIndent()
+
+    // Plasma painter: demoscene-style flowing color blobs from 4 additive sine waves.
+    val PAINTER_PLASMA_FRAG = """
+        #version 300 es
+        precision highp float;
+
+        uniform float u_time;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+
+        void main() {
+            vec2 uv = v_uv * 4.0 - 2.0;   // remap to [-2, 2] on both axes
+
+            float v = 0.0;
+            v += sin(uv.x * 1.5 + u_time * 0.7);
+            v += sin(uv.y * 1.5 + u_time * 0.9);
+            v += sin((uv.x + uv.y) * 1.0 + u_time * 0.5);
+            v += sin(length(uv) * 2.0 - u_time * 0.6);
+            v *= 0.25;   // normalise to approx [-1, 1]
+
+            float hue = fract(v * 0.5 + 0.5 + u_time * 0.03);
+
+            fragColor = vec4(hsv2rgb(vec3(hue, 0.9, 0.95)), 1.0);
         }
     """.trimIndent()
 

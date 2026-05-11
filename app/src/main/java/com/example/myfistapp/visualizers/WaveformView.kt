@@ -205,7 +205,7 @@ internal fun WaveformCanvas(
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier = modifier) {
-        val envelope = audioFile.amplitudeEnvelope
+        val envelope = audioFile.rmsEnvelope
         if (envelope.isEmpty()) return@Canvas
 
         val w = size.width
