@@ -15,3 +15,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Project source dumps for AI handoff
+all_code.txt
+project_code.txt
