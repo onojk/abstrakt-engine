@@ -1311,9 +1311,10 @@ private fun LockIconButton(
     param: LockableParam,
     lockedParams: Set<LockableParam>,
     onToggle: (LockableParam) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val locked = param in lockedParams
-    IconButton(onClick = { onToggle(param) }) {
+    IconButton(onClick = { onToggle(param) }, modifier = modifier) {
         Icon(
             imageVector        = if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen,
             contentDescription = if (locked) "Unlock ${param.name}" else "Lock ${param.name}",
@@ -1360,20 +1361,27 @@ private fun KaleidoSettingsContent(
 
         // ── GEOMETRY ─────────────────────────────────────────────────────────
         SettingsSectionHeader("Geometry")
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding        = PaddingValues(horizontal = 4.dp),
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            items(ShapeKind.entries.toList()) { kind ->
-                FilterChip(
-                    selected    = settings.shapeKind == kind,
-                    onClick     = { onShapeKindChange(kind) },
-                    label       = { Text(kind.name) },
-                    leadingIcon = if (settings.shapeKind == kind) {
-                        { Icon(Icons.Default.Check, contentDescription = null) }
-                    } else null,
-                )
+            LazyRow(
+                modifier              = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding        = PaddingValues(horizontal = 4.dp),
+            ) {
+                items(ShapeKind.entries.toList()) { kind ->
+                    FilterChip(
+                        selected    = settings.shapeKind == kind,
+                        onClick     = { onShapeKindChange(kind) },
+                        label       = { Text(kind.name) },
+                        leadingIcon = if (settings.shapeKind == kind) {
+                            { Icon(Icons.Default.Check, contentDescription = null) }
+                        } else null,
+                    )
+                }
             }
+            LockIconButton(LockableParam.SHAPE_KIND, settings.lockedParams, onToggleLock)
         }
 
         // ── KALEIDOSCOPE ─────────────────────────────────────────────────────
@@ -1479,7 +1487,18 @@ private fun KaleidoSettingsContent(
 
         // ── FRAME ────────────────────────────────────────────────────────────
         SettingsSectionHeader("Frame")
-        Text("Frame shape", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Frame shape",
+                style    = MaterialTheme.typography.bodyLarge,
+                color    = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            LockIconButton(LockableParam.FRAME_SHAPE, settings.lockedParams, onToggleLock)
+        }
         Spacer(Modifier.height(8.dp))
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1498,7 +1517,18 @@ private fun KaleidoSettingsContent(
         }
 
         Spacer(Modifier.height(12.dp))
-        Text("Frame color", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Frame color",
+                style    = MaterialTheme.typography.bodyLarge,
+                color    = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            LockIconButton(LockableParam.FRAME_COLOR, settings.lockedParams, onToggleLock)
+        }
         Spacer(Modifier.height(8.dp))
 
         val currentColor = Color(settings.frameColorArgb.toInt())
@@ -1562,6 +1592,7 @@ private fun KaleidoSettingsContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            LockIconButton(LockableParam.INVERT_COLORS, settings.lockedParams, onToggleLock)
             Switch(checked = settings.invertColors, onCheckedChange = { onInvertColorsChange(it) })
         }
 
@@ -1581,6 +1612,7 @@ private fun KaleidoSettingsContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            LockIconButton(LockableParam.COLORIZE_ENABLED, settings.lockedParams, onToggleLock)
             Switch(checked = settings.colorizeEnabled, onCheckedChange = { onColorizeEnabledChange(it) })
         }
 
@@ -1632,6 +1664,7 @@ private fun KaleidoSettingsContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            LockIconButton(LockableParam.DISTORTION_ENABLED, settings.lockedParams, onToggleLock)
             Switch(
                 checked         = settings.distortionEnabled,
                 onCheckedChange = { onDistortionEnabledChange(it) },
