@@ -57,6 +57,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -79,7 +82,8 @@ fun ExportWizard(
     viewModel: ExportViewModel,
     onClose: () -> Unit,
 ) {
-    val vm = viewModel
+    val vm      = viewModel
+    val context = LocalContext.current
 
     // Collect all state from the ViewModel.
     val step            by vm.step.collectAsStateWithLifecycle()
@@ -99,6 +103,17 @@ fun ExportWizard(
     val showCancelDialog  by vm.showCancelDialog.collectAsStateWithLifecycle()
     val exportKaleido     by vm.exportKaleido.collectAsStateWithLifecycle()
 
+    // Storage pre-flight state.
+    val estimatedBytes   by vm.estimatedBytes.collectAsStateWithLifecycle()
+    val freeBytes        by vm.freeBytes.collectAsStateWithLifecycle()
+    val spaceStatus      by vm.spaceStatus.collectAsStateWithLifecycle()
+    val prevExportsCount by vm.previousExportsCount.collectAsStateWithLifecycle()
+    val prevExportsBytes by vm.previousExportsBytes.collectAsStateWithLifecycle()
+    val showOutOfSpace   by vm.showOutOfSpaceDialog.collectAsStateWithLifecycle()
+
+    // Refresh storage once on wizard open.
+    LaunchedEffect(Unit) { vm.refreshStorageState() }
+
     val dismiss = onClose
 
     // Audio picker — must live in Compose; result forwarded to ViewModel.
@@ -106,6 +121,53 @@ fun ExportWizard(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) vm.loadPickedAudio(uri)
+    }
+
+    // ── Out-of-space dialog — floats on top of any step ───────────────────────
+    if (showOutOfSpace) {
+        AlertDialog(
+            onDismissRequest = { vm.dismissOutOfSpaceDialog() },
+            containerColor   = Color(0xFF1A1A24),
+            title = { Text("Out of space", color = NeonCyan) },
+            text  = {
+                Column {
+                    Text(
+                        "Your export ran out of storage. Only ${StorageEstimator.formatBytes(freeBytes)} is free.",
+                        color = Color.White,
+                    )
+                    if (prevExportsCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "You have $prevExportsCount previous export${if (prevExportsCount == 1) "" else "s"} " +
+                                "using ${StorageEstimator.formatBytes(prevExportsBytes)}. Clear them to make room?",
+                            color = DimWhite,
+                        )
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Free up space in your device settings and try again.", color = DimWhite)
+                    }
+                }
+            },
+            confirmButton = {
+                if (prevExportsCount > 0) {
+                    TextButton(onClick = {
+                        vm.clearPreviousExports { count, freed ->
+                            Toast.makeText(
+                                context,
+                                "Deleted $count, freed ${StorageEstimator.formatBytes(freed)}",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        vm.dismissOutOfSpaceDialog()
+                    }) { Text("Clear previous exports", color = NeonCyan) }
+                } else {
+                    TextButton(onClick = { vm.dismissOutOfSpaceDialog() }) { Text("OK", color = NeonCyan) }
+                }
+            },
+            dismissButton = if (prevExportsCount > 0) {
+                { TextButton(onClick = { vm.dismissOutOfSpaceDialog() }) { Text("Cancel", color = DimWhite) } }
+            } else null,
+        )
     }
 
     // ── Step routing ──────────────────────────────────────────────────────────
@@ -159,10 +221,16 @@ fun ExportWizard(
         )
 
         WizardStep.KALEIDO -> Step5Kaleido(
-            kaleidoSettings = exportKaleido,
-            onUpdate        = { vm.updateExportKaleido(it) },
-            onBack          = { vm.navTo(WizardStep.RESOLUTION) },
-            onStart         = { vm.startExport() },
+            kaleidoSettings      = exportKaleido,
+            onUpdate             = { vm.updateExportKaleido(it) },
+            onBack               = { vm.navTo(WizardStep.RESOLUTION) },
+            onStart              = { vm.startExport() },
+            estimatedBytes       = estimatedBytes,
+            freeBytes            = freeBytes,
+            spaceStatus          = spaceStatus,
+            previousExportsCount = prevExportsCount,
+            previousExportsBytes = prevExportsBytes,
+            onClearPreviousExports = { onDone -> vm.clearPreviousExports(onDone) },
         )
 
         WizardStep.PROGRESS -> {
@@ -357,16 +425,25 @@ private fun Step5Kaleido(
     onUpdate: (KaleidoSettings) -> Unit,
     onBack: () -> Unit,
     onStart: () -> Unit,
+    estimatedBytes: Long,
+    freeBytes: Long,
+    spaceStatus: SpaceStatus,
+    previousExportsCount: Int,
+    previousExportsBytes: Long,
+    onClearPreviousExports: ((Int, Long) -> Unit) -> Unit,
 ) {
+    val context = LocalContext.current
     val initialSettings = remember { kaleidoSettings }
     var overrideExpanded by rememberSaveable { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     WizardScaffold(
-        title        = "Kaleido settings",
-        onBack       = onBack,
-        primaryLabel = "Start Export",
-        onPrimary    = onStart,
-        primaryColor = Color(0xFF00CC66),
+        title          = "Kaleido settings",
+        onBack         = onBack,
+        primaryLabel   = "Start Export",
+        onPrimary      = onStart,
+        primaryEnabled = spaceStatus != SpaceStatus.HARD_BLOCK,
+        primaryColor   = Color(0xFF00CC66),
     ) {
         Spacer(Modifier.height(8.dp))
         KaleidoSummaryCard(kaleidoSettings)
@@ -401,6 +478,107 @@ private fun Step5Kaleido(
                 Text("Cancel override", color = DimWhite)
             }
         }
+
+        // ── Storage estimate ─────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+        Spacer(Modifier.height(10.dp))
+
+        val estText  = if (estimatedBytes > 0L) StorageEstimator.formatBytes(estimatedBytes) else "…"
+        val freeText = if (freeBytes > 0L)      StorageEstimator.formatBytes(freeBytes)      else "…"
+        Text(
+            text = "Estimated: $estText  ·  Free: $freeText",
+            color = when (spaceStatus) {
+                SpaceStatus.OK         -> DimWhite
+                SpaceStatus.SOFT_WARN  -> Color(0xFFFFB020)
+                SpaceStatus.HARD_BLOCK -> Color(0xFFFF4040)
+            },
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (spaceStatus != SpaceStatus.OK) {
+            Spacer(Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors   = CardDefaults.cardColors(
+                    containerColor = if (spaceStatus == SpaceStatus.HARD_BLOCK)
+                        Color(0xFF3A1010) else Color(0xFF3A2810),
+                ),
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = when (spaceStatus) {
+                            SpaceStatus.HARD_BLOCK -> "Not enough free space"
+                            SpaceStatus.SOFT_WARN  -> "Storage is getting tight"
+                            SpaceStatus.OK         -> ""
+                        },
+                        color = if (spaceStatus == SpaceStatus.HARD_BLOCK)
+                            Color(0xFFFF6060) else Color(0xFFFFC050),
+                        fontWeight = FontWeight.Bold,
+                        fontSize   = 14.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = when (spaceStatus) {
+                            SpaceStatus.HARD_BLOCK ->
+                                "This export needs $estText but only $freeText is free. Clear space and try again."
+                            SpaceStatus.SOFT_WARN  ->
+                                "This export needs $estText. After exporting you'll have very little room left."
+                            SpaceStatus.OK         -> ""
+                        },
+                        color    = Color.White,
+                        fontSize = 13.sp,
+                    )
+                    if (previousExportsCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = { showClearConfirm = true },
+                            colors  = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                        ) {
+                            Text(
+                                "Clear $previousExportsCount previous export${if (previousExportsCount == 1) "" else "s"}" +
+                                    " (${StorageEstimator.formatBytes(previousExportsBytes)})",
+                                color = Color.Black,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+    }
+
+    // ── Clear-previous confirmation dialog ────────────────────────────────────
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            containerColor   = Color(0xFF1A1A24),
+            title = { Text("Delete $previousExportsCount previous export${if (previousExportsCount == 1) "" else "s"}?", color = NeonCyan) },
+            text  = {
+                Text(
+                    "This will permanently delete ${StorageEstimator.formatBytes(previousExportsBytes)} of video files " +
+                        "from Movies/Abstrakt/. Any export currently in progress is not affected.",
+                    color = DimWhite,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    onClearPreviousExports { count, freed ->
+                        Toast.makeText(
+                            context,
+                            "Deleted $count file${if (count == 1) "" else "s"}, freed ${StorageEstimator.formatBytes(freed)}",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }) { Text("Delete", color = Color(0xFFFF4040)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel", color = DimWhite) }
+            },
+        )
     }
 }
 

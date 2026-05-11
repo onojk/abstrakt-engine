@@ -11,12 +11,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+
+enum class SpaceStatus { OK, SOFT_WARN, HARD_BLOCK }
 
 class ExportViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -89,16 +94,61 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     private val _showCancelDialog = MutableStateFlow(false)
     val showCancelDialog: StateFlow<Boolean> = _showCancelDialog.asStateFlow()
 
+    // ── Storage pre-flight ────────────────────────────────────────────────────
+
+    private val _estimatedBytes = MutableStateFlow(0L)
+    val estimatedBytes: StateFlow<Long> = _estimatedBytes.asStateFlow()
+
+    private val _freeBytes = MutableStateFlow(0L)
+    val freeBytes: StateFlow<Long> = _freeBytes.asStateFlow()
+
+    private val _previousExportsBytes = MutableStateFlow(0L)
+    val previousExportsBytes: StateFlow<Long> = _previousExportsBytes.asStateFlow()
+
+    private val _previousExportsCount = MutableStateFlow(0)
+    val previousExportsCount: StateFlow<Int> = _previousExportsCount.asStateFlow()
+
+    val spaceStatus: StateFlow<SpaceStatus> = combine(_estimatedBytes, _freeBytes) { est, free ->
+        when {
+            free <= 0L        -> SpaceStatus.OK
+            est  <= 0L        -> SpaceStatus.OK
+            est  >= free      -> SpaceStatus.HARD_BLOCK
+            est  >= free * 0.8 -> SpaceStatus.SOFT_WARN
+            else              -> SpaceStatus.OK
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SpaceStatus.OK)
+
+    // ── Out-of-space dialog ───────────────────────────────────────────────────
+
+    private val _showOutOfSpaceDialog = MutableStateFlow(false)
+    val showOutOfSpaceDialog: StateFlow<Boolean> = _showOutOfSpaceDialog.asStateFlow()
+
+    fun dismissOutOfSpaceDialog() { _showOutOfSpaceDialog.value = false }
+
     // ── Internal job tracking ─────────────────────────────────────────────────
 
     private var exportJob: Job? = null
     private var pendingStoreUri: Uri? = null
 
+    // ── Init — reactive estimate recomputation ────────────────────────────────
+
+    init {
+        viewModelScope.launch {
+            combine(_selectedRes, _selectedAudio, _currentAudioFile, _pickedAudioFile) { res, src, cur, picked ->
+                val resolved = when (src) {
+                    AudioSource.UseCurrent -> cur
+                    AudioSource.PickNew    -> picked
+                    AudioSource.Silent     -> null
+                }
+                val durSec   = resolved?.let { it.durationMs / 1000.0 } ?: 60.0
+                val hasAudio = resolved != null
+                StorageEstimator.estimateBytes(res.bitrate, durSec, hasAudio)
+            }.collect { _estimatedBytes.value = it }
+        }
+    }
+
     // ── Wizard lifecycle ──────────────────────────────────────────────────────
 
-    // Opens the wizard. If an export is in progress, resumes the PROGRESS step.
-    // If on the DONE step, re-shows the completion screen. Otherwise resets for
-    // a fresh flow and initializes config from the caller's current screen state.
     fun openWizard(mode: Mode, audioFile: AudioFile?) {
         if (exportJob?.isActive == true || _step.value == WizardStep.DONE) {
             _isWizardOpen.value = true
@@ -111,16 +161,12 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _step.value             = WizardStep.MODE
         _isWizardOpen.value     = true
         viewModelScope.launch { _exportKaleido.value = kaleidoStore.settingsFlow.first() }
+        refreshStorageState()
     }
 
-    // Closes the wizard UI without canceling an in-progress export.
-    // If the export just completed (DONE step), clears completion state so the
-    // next open starts fresh rather than jumping back to the done screen.
     fun closeWizard() {
         _isWizardOpen.value = false
-        if (_step.value == WizardStep.DONE) {
-            resetWizardState()
-        }
+        if (_step.value == WizardStep.DONE) resetWizardState()
     }
 
     // ── Config mutators ───────────────────────────────────────────────────────
@@ -132,6 +178,25 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     internal fun navTo(step: WizardStep)        { _step.value = step }
     fun requestCancelDialog()                   { _showCancelDialog.value = true }
     fun dismissCancelDialog()                   { _showCancelDialog.value = false }
+
+    // ── Storage ───────────────────────────────────────────────────────────────
+
+    fun refreshStorageState() {
+        viewModelScope.launch {
+            _freeBytes.value = StorageEstimator.freeBytesOnExternal(getApplication())
+            val entries = StorageEstimator.listPreviousExports(getApplication())
+            _previousExportsCount.value = entries.size
+            _previousExportsBytes.value = entries.sumOf { it.size }
+        }
+    }
+
+    fun clearPreviousExports(onDone: (Int, Long) -> Unit) {
+        viewModelScope.launch {
+            val (count, freed) = StorageEstimator.deleteAllPreviousExports(getApplication())
+            refreshStorageState()
+            withContext(Dispatchers.Main) { onDone(count, freed) }
+        }
+    }
 
     // ── Audio loading ─────────────────────────────────────────────────────────
 
@@ -157,6 +222,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     // ── Export ────────────────────────────────────────────────────────────────
 
     fun startExport() {
+        if (spaceStatus.value == SpaceStatus.HARD_BLOCK) return  // defense-in-depth; UI disables button
+
         val ctx = getApplication<Application>()
         val mode = _selectedMode.value
         val res  = _selectedRes.value
@@ -247,8 +314,15 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     onFailure = { e ->
                         deleteMediaStoreEntry(ctx, storeUri)
                         pendingStoreUri = null
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(ctx, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        if (isOutOfSpace(e)) {
+                            withContext(Dispatchers.Main) {
+                                refreshStorageState()
+                                _showOutOfSpaceDialog.value = true
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(ctx, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
                         }
                         _step.value = WizardStep.RESOLUTION
                     },
@@ -260,8 +334,15 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 pendingStoreUri?.let { deleteMediaStoreEntry(ctx, it) }
                 pendingStoreUri = null
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(ctx, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                if (isOutOfSpace(e)) {
+                    withContext(Dispatchers.Main) {
+                        refreshStorageState()
+                        _showOutOfSpaceDialog.value = true
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(ctx, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
                 _step.value = WizardStep.RESOLUTION
             }
@@ -277,26 +358,41 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         if (uri != null) deleteMediaStoreEntry(getApplication(), uri)
     }
 
-    // ── Internal reset ────────────────────────────────────────────────────────
+    // ── Internal ──────────────────────────────────────────────────────────────
+
+    private fun isOutOfSpace(e: Throwable): Boolean {
+        if (e is android.system.ErrnoException && e.errno == android.system.OsConstants.ENOSPC) return true
+        val msg = e.message?.lowercase() ?: ""
+        if ("enospc" in msg || "no space left" in msg) return true
+        var cause = e.cause
+        while (cause != null && cause !== e) {
+            if (cause is android.system.ErrnoException && cause.errno == android.system.OsConstants.ENOSPC) return true
+            val cmsg = cause.message?.lowercase() ?: ""
+            if ("enospc" in cmsg || "no space left" in cmsg) return true
+            cause = cause.cause
+        }
+        return false
+    }
 
     private fun resetWizardState() {
         cancelExport()
-        _step.value             = WizardStep.MODE
-        _selectedMode.value     = Mode.Cyclone
-        _selectedAudio.value    = AudioSource.Silent
-        _currentAudioFile.value = null
-        _pickedAudioFile.value  = null
-        _beatResponse.value     = true
-        _selectedRes.value      = ExportResolution.FHD_1080P
-        _isLoadingAudio.value   = false
-        _progressValue.value    = 0f
-        _progressPhase.value    = ""
-        _encodeStartMs.value    = 0L
-        _exportedUri.value      = null
-        _exportedName.value     = ""
-        _exportedSize.value     = 0L
-        _showCancelDialog.value = false
-        _exportKaleido.value    = KaleidoSettings()
+        _step.value                 = WizardStep.MODE
+        _selectedMode.value         = Mode.Cyclone
+        _selectedAudio.value        = AudioSource.Silent
+        _currentAudioFile.value     = null
+        _pickedAudioFile.value      = null
+        _beatResponse.value         = true
+        _selectedRes.value          = ExportResolution.FHD_1080P
+        _isLoadingAudio.value       = false
+        _progressValue.value        = 0f
+        _progressPhase.value        = ""
+        _encodeStartMs.value        = 0L
+        _exportedUri.value          = null
+        _exportedName.value         = ""
+        _exportedSize.value         = 0L
+        _showCancelDialog.value     = false
+        _showOutOfSpaceDialog.value = false
+        _exportKaleido.value        = KaleidoSettings()
     }
 
     override fun onCleared() {
