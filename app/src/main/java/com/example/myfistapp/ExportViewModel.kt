@@ -215,6 +215,14 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     partyEnabled                 = kaleido.partyEnabled,
                     randomEnabled                = kaleido.randomEnabled,
                     partyIntensity               = kaleido.partyIntensity,
+                    bassZoomIntensity            = kaleido.bassZoomIntensity,
+                    contrast                     = kaleido.contrast,
+                    contrastPasses               = kaleido.contrastPasses,
+                    saturation                   = kaleido.saturation,
+                    distortionPlusEnabled        = kaleido.distortionPlusEnabled,
+                    distortionPlusYaw            = kaleido.distortionPlusYaw,
+                    distortionPlusPitch          = kaleido.distortionPlusPitch,
+                    distortionPlusRoll           = kaleido.distortionPlusRoll,
                     lockedParams                 = kaleido.lockedParams,
                 )
                 val result = exporter.export { fraction, phase ->

@@ -5,6 +5,7 @@ import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.Random
 
 private const val TAG = "SkinSlotRegistry"
 private const val JSON_FILE = "skin_slots.json"
@@ -54,7 +55,15 @@ object SkinSlotRegistry {
     fun filledSlots(): List<FilledSlot> =
         slots.filterNotNull().sortedBy { it.index }
 
+    fun populatedUserSlotFiles(): List<File> = filledSlots().map { it.file }
+
     fun isFull(): Boolean = filledSlots().size == MAX_SLOTS
+
+    fun listAvailableModes(): List<Mode> = buildList {
+        add(Mode.Cyclone)
+        for (i in 1..5) add(Mode.Builtin(i))
+        for (slot in filledSlots()) add(Mode.UserSlot(slot.index))
+    }
 
     // True if there are empty slots beyond the first one (for "···" indicator later).
     fun hasMoreEmptyAfterFirst(): Boolean {
@@ -100,4 +109,10 @@ object SkinSlotRegistry {
             Log.w(TAG, "loadFromJson failed: ${e.message}")
         }
     }
+}
+
+fun pickRandomMode(currentMode: Mode, availableModes: List<Mode>): Mode {
+    val candidates = availableModes.filter { it != currentMode }
+    if (candidates.isEmpty()) return currentMode
+    return candidates[Random().nextInt(candidates.size)]
 }

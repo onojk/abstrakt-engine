@@ -426,6 +426,9 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
         SummaryRow("Distortion", if (settings.distortionEnabled)
             "${(settings.distortionAmplitude * 100).toInt()}% @ ${String.format("%.1f", settings.distortionFrequency)}"
         else "Off")
+        SummaryRow("Distortion Plus", if (settings.distortionPlusEnabled)
+            "Y${settings.distortionPlusYaw.toInt()} P${settings.distortionPlusPitch.toInt()} R${settings.distortionPlusRoll.toInt()}"
+        else "Off")
         val partyLine = buildString {
             append("Party: ${if (settings.partyEnabled) "on" else "off"}")
             append(" | Random: ${if (settings.randomEnabled) "on" else "off"}")
@@ -681,6 +684,84 @@ private fun ExportKaleidoOverrideContent(
                 )
                 Text(
                     text       = String.format("%.1f", settings.distortionFrequency),
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(distortionPlusEnabled = !settings.distortionPlusEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Distortion Plus", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked         = settings.distortionPlusEnabled,
+                onCheckedChange = { onUpdate(settings.copy(distortionPlusEnabled = it)) },
+            )
+        }
+
+        if (settings.distortionPlusEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Yaw", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+                Slider(
+                    value         = settings.distortionPlusYaw,
+                    onValueChange = { onUpdate(settings.copy(distortionPlusYaw = it)) },
+                    valueRange    = -180f..180f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${settings.distortionPlusYaw.toInt()}°",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Pitch", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+                Slider(
+                    value         = settings.distortionPlusPitch,
+                    onValueChange = { onUpdate(settings.copy(distortionPlusPitch = it)) },
+                    valueRange    = -90f..90f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${settings.distortionPlusPitch.toInt()}°",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Roll", color = Color.White, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+                Slider(
+                    value         = settings.distortionPlusRoll,
+                    onValueChange = { onUpdate(settings.copy(distortionPlusRoll = it)) },
+                    valueRange    = -180f..180f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${settings.distortionPlusRoll.toInt()}°",
                     color      = Color.White,
                     fontSize   = 12.sp,
                     fontFamily = FontFamily.Monospace,

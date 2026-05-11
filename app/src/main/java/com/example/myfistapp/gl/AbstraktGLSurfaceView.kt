@@ -68,5 +68,16 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setDistortionAmplitude(value: Float)      { queueEvent { renderer.distortionAmplitude = value } }
     fun setDistortionFrequency(value: Float)      { queueEvent { renderer.distortionFrequency = value } }
     fun setZoomMultiplier(value: Float)          { queueEvent { renderer.zoomMultiplier = value } }
+    fun setBassZoomIntensity(value: Float)       { queueEvent { renderer.bassZoomIntensity = value } }
+    fun setContrast(value: Float)               { queueEvent { renderer.contrast = value } }
+    fun setContrastPasses(value: Int)           { queueEvent { renderer.contrastPasses = value } }
+    fun setSaturation(value: Float)             { queueEvent { renderer.saturation = value } }
+    fun setDistortionPlusEnabled(value: Boolean) { queueEvent { renderer.distortionPlusEnabled = value } }
+    fun setDistortionPlusYaw(value: Float)       { queueEvent { renderer.distortionPlusYaw = value } }
+    fun setDistortionPlusPitch(value: Float)     { queueEvent { renderer.distortionPlusPitch = value } }
+    fun setDistortionPlusRoll(value: Float)      { queueEvent { renderer.distortionPlusRoll = value } }
     val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
+    fun captureMosaicController(): CaptureMosaicController = renderer.captureController
+    fun kaleidoFboWidth(): Int  = renderer.kaleidoTexW
+    fun kaleidoFboHeight(): Int = renderer.kaleidoTexH
 }

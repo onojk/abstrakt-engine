@@ -232,6 +232,9 @@ internal object Shaders {
         uniform int   u_distortion_enabled;
         uniform float u_distortion_amplitude;  // 0..1
         uniform float u_distortion_frequency;  // 0.5..8.0
+        uniform float u_contrast;              // 0..2, 1=passthrough
+        uniform int   u_contrast_passes;       // 1..6, >1=posterization
+        uniform float u_saturation;            // 0..2, 1=passthrough
         uniform float u_time;
         in  vec2 v_uv;
         out vec4 fragColor;
@@ -260,6 +263,12 @@ internal object Shaders {
                 uv.y += waveV * u_distortion_amplitude * 0.05;
             }
             vec4 c = texture(u_painterTexture, uv);
+            for (int i = 0; i < 6; ++i) {
+                if (i >= u_contrast_passes) break;
+                c.rgb = clamp((c.rgb - vec3(0.5)) * u_contrast + vec3(0.5), 0.0, 1.0);
+            }
+            float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+            c.rgb = clamp(mix(vec3(luma), c.rgb, u_saturation), 0.0, 1.0);
             if (u_invert_colors == 1)    c.rgb  = vec3(1.0) - c.rgb;
             if (u_colorize_enabled == 1) c.rgb *= hsv2rgb(u_colorize_hue, 1.0, 1.0);
             fragColor = c;
@@ -804,6 +813,60 @@ internal object Shaders {
         out vec4 fragColor;
         void main() {
             fragColor = vec4(texture(u_skin, v_uv).rgb, 1.0);
+        }
+    """.trimIndent()
+
+    // Pass 2.5 — equirectangular yaw/pitch/roll rotation of the shape FBO.
+    // Standard equirectangular panorama math; reimplemented from first principles.
+    // When all angles are 0 the output is pixel-identical to the input.
+    // Wrap mode: GL_REPEAT on S (yaw wraps the horizon), GL_CLAMP_TO_EDGE on T (poles).
+    val DISTORTION_PLUS_FRAG = """
+        #version 300 es
+        precision highp float;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        uniform sampler2D u_content;
+        uniform float u_yaw;    // radians
+        uniform float u_pitch;  // radians
+        uniform float u_roll;   // radians
+
+        const float PI  = 3.14159265359;
+        const float TAU = 6.28318530718;
+
+        void main() {
+            // 1. Output UV -> spherical (lon, lat)
+            float lon = (v_uv.x - 0.5) * TAU;
+            float lat = (v_uv.y - 0.5) * PI;
+
+            // 2. Spherical -> Cartesian unit vector
+            vec3 p = vec3(
+                cos(lat) * sin(lon),
+                sin(lat),
+                cos(lat) * cos(lon)
+            );
+
+            // 3. Apply roll (Z), pitch (X), yaw (Y) in that order.
+            float cr = cos(u_roll),  sr = sin(u_roll);
+            float cp = cos(u_pitch), sp = sin(u_pitch);
+            float cy = cos(u_yaw),   sy = sin(u_yaw);
+
+            // Roll around Z
+            p = vec3(cr*p.x - sr*p.y, sr*p.x + cr*p.y, p.z);
+            // Pitch around X
+            p = vec3(p.x, cp*p.y - sp*p.z, sp*p.y + cp*p.z);
+            // Yaw around Y
+            p = vec3(cy*p.x + sy*p.z, p.y, -sy*p.x + cy*p.z);
+
+            // 4. Cartesian -> spherical
+            float lonOut = atan(p.x, p.z);
+            float latOut = asin(clamp(p.y, -1.0, 1.0));
+
+            // 5. Spherical -> source UV
+            vec2 src = vec2(lonOut / TAU + 0.5, latOut / PI + 0.5);
+
+            fragColor = texture(u_content, src);
         }
     """.trimIndent()
 }

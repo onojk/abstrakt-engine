@@ -32,7 +32,16 @@ object KaleidoKeys {
     val PARTY_ENABLED          = booleanPreferencesKey("party_enabled")
     val RANDOM_ENABLED         = booleanPreferencesKey("random_enabled")
     val PARTY_INTENSITY        = floatPreferencesKey("party_intensity")
-    val LOCKED_PARAMS          = stringPreferencesKey("locked_params")
+    val BASS_ZOOM_INTENSITY    = floatPreferencesKey("bass_zoom_intensity")
+    val CONTRAST               = floatPreferencesKey("contrast")
+    val CONTRAST_PASSES        = intPreferencesKey("contrast_passes")
+    val SATURATION             = floatPreferencesKey("saturation")
+    val DISTORTION_PLUS_ENABLED = booleanPreferencesKey("distortion_plus_enabled")
+    val DISTORTION_PLUS_YAW    = floatPreferencesKey("distortion_plus_yaw")
+    val DISTORTION_PLUS_PITCH  = floatPreferencesKey("distortion_plus_pitch")
+    val DISTORTION_PLUS_ROLL   = floatPreferencesKey("distortion_plus_roll")
+    val LOCKED_PARAMS           = stringPreferencesKey("locked_params")
+    val IMMERSIVE_TOOLTIP_SHOWN = booleanPreferencesKey("immersive_tooltip_shown")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -58,6 +67,14 @@ class KaleidoSettingsStore(private val context: Context) {
             partyEnabled         = prefs[KaleidoKeys.PARTY_ENABLED] ?: false,
             randomEnabled        = prefs[KaleidoKeys.RANDOM_ENABLED] ?: false,
             partyIntensity       = (prefs[KaleidoKeys.PARTY_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
+            bassZoomIntensity    = (prefs[KaleidoKeys.BASS_ZOOM_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
+            contrast             = (prefs[KaleidoKeys.CONTRAST] ?: 1.0f).coerceIn(0f, 2f),
+            contrastPasses       = (prefs[KaleidoKeys.CONTRAST_PASSES] ?: 1).coerceIn(1, 6),
+            saturation           = (prefs[KaleidoKeys.SATURATION] ?: 1.0f).coerceIn(0f, 2f),
+            distortionPlusEnabled = prefs[KaleidoKeys.DISTORTION_PLUS_ENABLED] ?: false,
+            distortionPlusYaw    = (prefs[KaleidoKeys.DISTORTION_PLUS_YAW] ?: 0f).coerceIn(-180f, 180f),
+            distortionPlusPitch  = (prefs[KaleidoKeys.DISTORTION_PLUS_PITCH] ?: 0f).coerceIn(-90f, 90f),
+            distortionPlusRoll   = (prefs[KaleidoKeys.DISTORTION_PLUS_ROLL] ?: 0f).coerceIn(-180f, 180f),
             lockedParams         = prefs[KaleidoKeys.LOCKED_PARAMS]
                 ?.split(",")
                 ?.filter { it.isNotBlank() }
@@ -145,9 +162,49 @@ class KaleidoSettingsStore(private val context: Context) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.PARTY_INTENSITY] = value.coerceIn(0f, 1f) }
     }
 
+    suspend fun setBassZoomIntensity(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BASS_ZOOM_INTENSITY] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setContrast(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.CONTRAST] = value.coerceIn(0f, 2f) }
+    }
+
+    suspend fun setContrastPasses(value: Int) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.CONTRAST_PASSES] = value.coerceIn(1, 6) }
+    }
+
+    suspend fun setSaturation(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.SATURATION] = value.coerceIn(0f, 2f) }
+    }
+
+    suspend fun setDistortionPlusEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_PLUS_ENABLED] = value }
+    }
+
+    suspend fun setDistortionPlusYaw(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_PLUS_YAW] = value.coerceIn(-180f, 180f) }
+    }
+
+    suspend fun setDistortionPlusPitch(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_PLUS_PITCH] = value.coerceIn(-90f, 90f) }
+    }
+
+    suspend fun setDistortionPlusRoll(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.DISTORTION_PLUS_ROLL] = value.coerceIn(-180f, 180f) }
+    }
+
     suspend fun setLockedParams(value: Set<LockableParam>) {
         context.kaleidoDataStore.edit {
             it[KaleidoKeys.LOCKED_PARAMS] = value.joinToString(",") { p -> p.name }
         }
+    }
+
+    val hasShownImmersiveTooltipFlow: Flow<Boolean> = context.kaleidoDataStore.data.map { prefs ->
+        prefs[KaleidoKeys.IMMERSIVE_TOOLTIP_SHOWN] ?: false
+    }
+
+    suspend fun markImmersiveTooltipShown() {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.IMMERSIVE_TOOLTIP_SHOWN] = true }
     }
 }

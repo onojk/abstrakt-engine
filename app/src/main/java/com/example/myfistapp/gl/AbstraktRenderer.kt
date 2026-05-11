@@ -92,20 +92,35 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var frameOverlayProgram: ShaderProgram? = null
     private var kaleidoFBO  = 0
     private var kaleidoTex  = 0
-    private var kaleidoTexW = 0
-    private var kaleidoTexH = 0
+    @Volatile internal var kaleidoTexW = 0
+    @Volatile internal var kaleidoTexH = 0
+    internal val captureController = CaptureMosaicController()
+    private var distortionPlusFbo  = 0
+    private var distortionPlusTex  = 0
+    private var distortionPlusFboW = 0
+    private var distortionPlusFboH = 0
+    private var distortionPlusProgram: ShaderProgram? = null
     private var shapeFbo         = 0
     private var shapeColorTex    = 0
     private var shapeDepthBuffer = 0
     private var shapeFboW        = 0
     private var shapeFboH        = 0
-    @Volatile var zoomMultiplier  = 1.0f
-    @Volatile var invertColors      = false
+    @Volatile var zoomMultiplier      = 1.0f
+    @Volatile var bassZoomIntensity   = 0.5f   // 0=off, 1=max bass-driven zoom pulse
+    private var smoothedBass          = 0.0f   // EMA of snap.bands[0]; GL thread only
+    @Volatile var contrast            = 1.0f   // 0..2, 1=passthrough
+    @Volatile var contrastPasses      = 1      // 1..6, >1=posterization
+    @Volatile var saturation          = 1.0f   // 0..2, 1=passthrough
+    @Volatile var invertColors        = false
     @Volatile var colorizeEnabled      = false
     @Volatile var colorizeHue          = 0f        // degrees 0..360
     @Volatile var distortionEnabled    = false
     @Volatile var distortionAmplitude  = 0.3f      // 0..1
     @Volatile var distortionFrequency  = 2.0f      // 0.5..8.0
+    @Volatile var distortionPlusEnabled = false
+    @Volatile var distortionPlusYaw     = 0f       // -180..180 degrees
+    @Volatile var distortionPlusPitch   = 0f       // -90..90 degrees
+    @Volatile var distortionPlusRoll    = 0f       // -180..180 degrees
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -171,6 +186,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         ribbonFboB = 0; ribbonTexB = 0
         kaleidoFBO = 0; kaleidoTex = 0; kaleidoTexW = 0; kaleidoTexH = 0
         shapeFbo = 0; shapeColorTex = 0; shapeDepthBuffer = 0; shapeFboW = 0; shapeFboH = 0
+        distortionPlusFbo = 0; distortionPlusTex = 0; distortionPlusFboW = 0; distortionPlusFboH = 0
+        distortionPlusProgram = null
         ribbonReadIsA    = true
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -199,9 +216,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             painterPrograms[entry.painter] = ShaderProgram(entry.vert, entry.frag)
         }
 
-        ribbonProgram       = ShaderProgram(Shaders.TEST_VERT, Shaders.RIBBON_FRAG)
-        blitProgram         = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
-        frameOverlayProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.FRAME_OVERLAY_FRAG)
+        ribbonProgram          = ShaderProgram(Shaders.TEST_VERT, Shaders.RIBBON_FRAG)
+        blitProgram            = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
+        frameOverlayProgram    = ShaderProgram(Shaders.TEST_VERT, Shaders.FRAME_OVERLAY_FRAG)
+        distortionPlusProgram  = ShaderProgram(Shaders.TEST_VERT, Shaders.DISTORTION_PLUS_FRAG)
 
         // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
         val vaos = IntArray(1)
@@ -390,6 +408,38 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         if (kaleidoTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(kaleidoTex), 0); kaleidoTex = 0 }
         if (kaleidoFBO != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(kaleidoFBO), 0); kaleidoFBO = 0 }
         kaleidoTexW = 0; kaleidoTexH = 0
+    }
+
+    private fun createDistortionPlusFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        distortionPlusTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, distortionPlusTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        // GL_REPEAT on S: yaw wraps the horizon seamlessly.
+        // GL_CLAMP_TO_EDGE on T: no wrap past the poles.
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_REPEAT)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        distortionPlusFbo = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, distortionPlusFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, distortionPlusTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        distortionPlusFboW = w
+        distortionPlusFboH = h
+        Log.d(TAG, "distortionPlusFBO: ${w}x${h} fbo=$distortionPlusFbo tex=$distortionPlusTex")
+    }
+
+    private fun destroyDistortionPlusFBO() {
+        if (distortionPlusTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(distortionPlusTex), 0); distortionPlusTex = 0 }
+        if (distortionPlusFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(distortionPlusFbo), 0); distortionPlusFbo = 0 }
+        distortionPlusFboW = 0; distortionPlusFboH = 0
     }
 
     private fun createShapeFBO(w: Int, h: Int) {
@@ -610,6 +660,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         val shakeY   = (shakeAmp * Math.sin(timeSec * 45.0 + 1.3)).toFloat()
 
         // ── Collapse animation update ─────────────────────────────────────────
+        smoothedBass  = smoothedBass * 0.7f + snap.bands[0] * 0.3f
         val riBass    = (snap.bands[0] + snap.bands[1]) * 0.5f
         val riMid     = (snap.bands[2] + snap.bands[3] + snap.bands[4]) / 3.0f
         val riTreble  = (snap.bands[5] + snap.bands[6] + snap.bands[7]) / 3.0f
@@ -795,6 +846,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         cProg.setInt("u_distortion_enabled",  if (distortionEnabled)  1 else 0)
         cProg.setFloat("u_distortion_amplitude", distortionAmplitude)
         cProg.setFloat("u_distortion_frequency", distortionFrequency)
+        cProg.setFloat("u_contrast",          contrast)
+        cProg.setInt("u_contrast_passes",     contrastPasses)
+        cProg.setFloat("u_saturation",        saturation)
         cProg.setFloat("u_time",              timeSec)
 
         loadShapeMeshIfNeeded()
@@ -808,6 +862,33 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         GLES30.glDisable(GLES30.GL_CULL_FACE)
 
+        // ── Pass 2.5: Distortion Plus → distortionPlusFbo (optional) ─────────
+        val finalShapeTex = if (distortionPlusEnabled) {
+            val dpProg = distortionPlusProgram
+            if (dpProg != null) {
+                if (distortionPlusFbo == 0 ||
+                    distortionPlusFboW != surfaceWidth ||
+                    distortionPlusFboH != surfaceHeight) {
+                    destroyDistortionPlusFBO()
+                    createDistortionPlusFBO(surfaceWidth, surfaceHeight)
+                }
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, distortionPlusFbo)
+                GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                GLES30.glDisable(GLES30.GL_BLEND)
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shapeColorTex)
+                dpProg.use()
+                dpProg.setInt("u_content", 0)
+                dpProg.setFloat("u_yaw",   Math.toRadians(distortionPlusYaw.toDouble()).toFloat())
+                dpProg.setFloat("u_pitch", Math.toRadians(distortionPlusPitch.toDouble()).toFloat())
+                dpProg.setFloat("u_roll",  Math.toRadians(distortionPlusRoll.toDouble()).toFloat())
+                drawQuad()
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                distortionPlusTex
+            } else shapeColorTex
+        } else shapeColorTex
+
         // ── Pass 3: Kaleido → intermediate FBO ───────────────────────────────
         val kProg = kaleidoProgram
         if (kProg != null) {
@@ -819,7 +900,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
             GLES30.glDisable(GLES30.GL_BLEND)
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shapeColorTex)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, finalShapeTex)
             kProg.use()
             kProg.setInt("u_content", 0)
             kProg.setVec2("u_resolution", wW, wH)
@@ -827,12 +908,16 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             kProg.setFloat("u_kaleido_folds", foldCount.toFloat())
             val rotOffset = if (foldCount == 4 && squareRotationLocked) (Math.PI / 4.0).toFloat() else 0f
             kProg.setFloat("u_kaleido_rotation_offset", rotOffset)
-            // Invert: higher user % = more zoomed in = smaller sampling radius.
-            val effectiveZoom = currentShape.kaleidoZoom() / zoomMultiplier
+            // Bass pulse: smoothedBass drives a zoom-in on kick hits.
+            val bassMod = 1.0f + bassZoomIntensity * smoothedBass
+            val effectiveZoom = currentShape.kaleidoZoom() / zoomMultiplier * bassMod
             kProg.setFloat("u_kaleido_zoom", effectiveZoom)
             drawQuad()
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+            // Capture one tile per frame for Capture Mosaic (before frame overlay).
+            captureController.captureTileIfActive(kaleidoFBO, kaleidoTexW, kaleidoTexH)
 
             // ── Pass 4: Frame overlay → screen / encoder surface ──────────────
             val foProg = frameOverlayProgram
@@ -895,9 +980,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         kaleidoProgram?.delete(); kaleidoProgram = null
         painterPrograms.values.forEach { it.delete() }
         painterPrograms.clear()
-        ribbonProgram?.delete();       ribbonProgram       = null
-        blitProgram?.delete();         blitProgram         = null
-        frameOverlayProgram?.delete(); frameOverlayProgram = null
+        ribbonProgram?.delete();          ribbonProgram          = null
+        blitProgram?.delete();            blitProgram            = null
+        frameOverlayProgram?.delete();    frameOverlayProgram    = null
+        distortionPlusProgram?.delete();  distortionPlusProgram  = null
 
         if (vaoId            != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),            0); vaoId            = 0 }
         if (vboId            != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),            0); vboId            = 0 }
@@ -924,6 +1010,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
 
         destroyKaleidoFBO()
         destroyShapeFBO()
+        destroyDistortionPlusFBO()
         destroyRibbonFBOs()
         destroyFBO()
 

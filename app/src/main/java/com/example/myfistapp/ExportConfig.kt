@@ -19,6 +19,13 @@ data class ExportConfig(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,
+    val contrast: Float = 1.0f,
+    val contrastPasses: Int = 1,
+    val saturation: Float = 1.0f,
+    val distortionPlusEnabled: Boolean = false,
+    val distortionPlusYaw: Float = 0f,
+    val distortionPlusPitch: Float = 0f,
+    val distortionPlusRoll: Float = 0f,
 )
 
 sealed class AudioSource {

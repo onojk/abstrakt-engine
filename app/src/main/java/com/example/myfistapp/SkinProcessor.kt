@@ -68,15 +68,7 @@ suspend fun processSkinFromUri(
     if (scaled !== resized) resized.recycle()
 
     // e. Mirror: [original | flipped] → seamless GL_REPEAT wrap.
-    val finalBitmap = Bitmap.createBitmap(tier * 2, 256, Bitmap.Config.ARGB_8888)
-    val canvas      = Canvas(finalBitmap)
-    canvas.drawBitmap(scaled, 0f, 0f, null)
-    val mirrorMatrix = Matrix().apply {
-        preScale(-1f, 1f)
-        postTranslate(tier * 2f, 0f)
-    }
-    canvas.drawBitmap(scaled, mirrorMatrix, null)
-    scaled.recycle()
+    val finalBitmap = applyMirrorSeam(scaled)  // recycles scaled
 
     // f. Save to filesDir/user_skins/skin_<timestamp>.jpg
     val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
@@ -88,6 +80,21 @@ suspend fun processSkinFromUri(
 
     Log.d(TAG, "saved ${outFile.name} (${tier * 2}x256, tier=$tier)")
     outFile
+}
+
+// Doubles bitmap width by mirroring: [original | flipped] — ensures seamless GL_REPEAT wrapping.
+// Recycles `input`.
+internal fun applyMirrorSeam(input: Bitmap): Bitmap {
+    val out = Bitmap.createBitmap(input.width * 2, input.height, Bitmap.Config.ARGB_8888)
+    val c   = Canvas(out)
+    c.drawBitmap(input, 0f, 0f, null)
+    val m = Matrix().apply {
+        preScale(-1f, 1f)
+        postTranslate(input.width * 2f, 0f)
+    }
+    c.drawBitmap(input, m, null)
+    input.recycle()
+    return out
 }
 
 private fun decodeSampledBitmap(context: Context, uri: Uri, maxLongEdge: Int): Bitmap? {

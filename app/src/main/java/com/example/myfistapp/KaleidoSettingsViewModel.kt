@@ -87,9 +87,48 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setPartyIntensity(value) }
     }
 
+    fun setBassZoomIntensity(value: Float) {
+        viewModelScope.launch { store.setBassZoomIntensity(value) }
+    }
+
+    fun setContrast(value: Float) {
+        viewModelScope.launch { store.setContrast(value) }
+    }
+
+    fun setContrastPasses(value: Int) {
+        viewModelScope.launch { store.setContrastPasses(value) }
+    }
+
+    fun setSaturation(value: Float) {
+        viewModelScope.launch { store.setSaturation(value) }
+    }
+
+    fun setDistortionPlusEnabled(value: Boolean) {
+        viewModelScope.launch { store.setDistortionPlusEnabled(value) }
+    }
+
+    fun setDistortionPlusYaw(value: Float) {
+        viewModelScope.launch { store.setDistortionPlusYaw(value) }
+    }
+
+    fun setDistortionPlusPitch(value: Float) {
+        viewModelScope.launch { store.setDistortionPlusPitch(value) }
+    }
+
+    fun setDistortionPlusRoll(value: Float) {
+        viewModelScope.launch { store.setDistortionPlusRoll(value) }
+    }
+
     fun toggleLock(param: LockableParam) {
         val current = settings.value.lockedParams
         val updated = if (param in current) current - param else current + param
         viewModelScope.launch { store.setLockedParams(updated) }
+    }
+
+    val hasShownImmersiveTooltip: StateFlow<Boolean> = store.hasShownImmersiveTooltipFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = true)
+
+    fun markImmersiveTooltipShown() {
+        viewModelScope.launch { store.markImmersiveTooltipShown() }
     }
 }

@@ -12,6 +12,14 @@ enum class LockableParam {
     DISTORTION_AMPLITUDE,
     DISTORTION_FREQUENCY,
     ZOOM_MULTIPLIER,
+    BASS_ZOOM_INTENSITY,
+    CONTRAST,
+    CONTRAST_PASSES,
+    SATURATION,
+    DISTORTION_PLUS_ENABLED,
+    DISTORTION_PLUS_YAW,
+    DISTORTION_PLUS_PITCH,
+    DISTORTION_PLUS_ROLL,
 }
 
 enum class FrameShape {
@@ -38,6 +46,14 @@ data class KaleidoSettings(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,       // shared by both engines; 0..1
+    val bassZoomIntensity: Float = 0.5f,    // 0=off, 1=max bass-driven zoom pulse
+    val contrast: Float = 1.0f,            // 0..2, 1=passthrough
+    val contrastPasses: Int = 1,           // 1..6, >1=posterization
+    val saturation: Float = 1.0f,          // 0..2, 1=passthrough
+    val distortionPlusEnabled: Boolean = false,
+    val distortionPlusYaw: Float = 0f,     // -180..180 degrees
+    val distortionPlusPitch: Float = 0f,   // -90..90 degrees
+    val distortionPlusRoll: Float = 0f,    // -180..180 degrees
     val lockedParams: Set<LockableParam> = emptySet(),
 )
 

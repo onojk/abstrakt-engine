@@ -90,6 +90,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -125,11 +126,35 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import com.example.myfistapp.gl.PainterSnapshotter
+import com.example.myfistapp.gl.CaptureMosaicController
+import android.app.Activity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 // Carousel mode model — sealed hierarchy for the swipe carousel.
 sealed class Mode {
@@ -149,6 +174,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
+        WindowInsetsControllerCompat(window, window.decorView).let { ctrl ->
+            ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            ctrl.hide(WindowInsetsCompat.Type.systemBars())
+        }
         setContent {
             MyFistAppTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -201,9 +230,38 @@ private fun VisualizerScreen() {
     var showSlotSheet    by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
     // Add-skin menu anchor — whether the dropdown is visible and which anchor triggered it.
-    var showAddMenu      by remember { mutableStateOf(false) }
+    var showAddMenu          by remember { mutableStateOf(false) }
+    // Random Mosaic state
+    var excludeDefaultSkins  by remember { mutableStateOf(false) }
+    var isMosaicGenerating   by remember { mutableStateOf(false) }
+    var builtinSnapshotFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    // Capture Mosaic state
+    var isCapturing     by remember { mutableStateOf(false) }
+    var captureProgress by remember { mutableIntStateOf(0) }
     // Kaleido settings sheet — survives rotation via ViewModel StateFlow.
     val isSettingsOpen by kaleidoVm.isSheetOpen.collectAsStateWithLifecycle()
+
+    val view     = LocalView.current
+    val activity = context as Activity
+    var isToolbarVisible  by remember { mutableStateOf(false) }
+    var lastInteractionMs by remember { mutableLongStateOf(0L) }
+
+    // Sync system bar visibility whenever chrome state changes.
+    LaunchedEffect(isToolbarVisible) {
+        val ctrl = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+        if (isToolbarVisible) ctrl.show(WindowInsetsCompat.Type.systemBars())
+        else                  ctrl.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    // Auto-hide chrome after 3 s of inactivity.
+    LaunchedEffect(isToolbarVisible, lastInteractionMs, isSettingsOpen) {
+        if (isToolbarVisible && !isSettingsOpen) {
+            delay(3_000)
+            if (System.currentTimeMillis() - lastInteractionMs >= 3_000) {
+                isToolbarVisible = false
+            }
+        }
+    }
 
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
@@ -223,6 +281,7 @@ private fun VisualizerScreen() {
                     glView.onPause()
                     micCapture.stop()
                     isMicActive = false
+                    glView.captureMosaicController().cancel()
                 }
                 else -> {}
             }
@@ -287,6 +346,14 @@ private fun VisualizerScreen() {
         glView.setDistortionEnabled(kaleidoSettings.distortionEnabled)
         glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
         glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
+        glView.setBassZoomIntensity(kaleidoSettings.bassZoomIntensity)
+        glView.setContrast(kaleidoSettings.contrast)
+        glView.setContrastPasses(kaleidoSettings.contrastPasses)
+        glView.setSaturation(kaleidoSettings.saturation)
+        glView.setDistortionPlusEnabled(kaleidoSettings.distortionPlusEnabled)
+        glView.setDistortionPlusYaw(kaleidoSettings.distortionPlusYaw)
+        glView.setDistortionPlusPitch(kaleidoSettings.distortionPlusPitch)
+        glView.setDistortionPlusRoll(kaleidoSettings.distortionPlusRoll)
     }
 
     LaunchedEffect(kaleidoSettings.partyEnabled)   { partyEngine.enabled   = kaleidoSettings.partyEnabled }
@@ -312,6 +379,14 @@ private fun VisualizerScreen() {
             glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
             glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
             glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
+            glView.setBassZoomIntensity(kaleidoSettings.bassZoomIntensity)
+            glView.setContrast(kaleidoSettings.contrast)
+            glView.setContrastPasses(kaleidoSettings.contrastPasses)
+            glView.setSaturation(kaleidoSettings.saturation)
+            glView.setDistortionPlusEnabled(kaleidoSettings.distortionPlusEnabled)
+            glView.setDistortionPlusYaw(kaleidoSettings.distortionPlusYaw)
+            glView.setDistortionPlusPitch(kaleidoSettings.distortionPlusPitch)
+            glView.setDistortionPlusRoll(kaleidoSettings.distortionPlusRoll)
         }
     }
 
@@ -513,6 +588,35 @@ private fun VisualizerScreen() {
         }
     }
 
+    // Pre-warm built-in painter snapshots so the first Random Mosaic tap is instant.
+    LaunchedEffect(Unit) {
+        builtinSnapshotFiles = PainterSnapshotter.ensureBuiltinSnapshots(context)
+    }
+
+    // Poll capture progress while a Capture Mosaic is active.
+    LaunchedEffect(isCapturing) {
+        if (!isCapturing) return@LaunchedEffect
+        while (true) {
+            captureProgress = glView.captureMosaicController().capturedCount
+            delay(30L)
+        }
+    }
+
+    val hasShownImmersiveTooltip by kaleidoVm.hasShownImmersiveTooltip.collectAsStateWithLifecycle()
+
+    // Auto-dismiss tooltip once the toolbar is revealed for the first time.
+    LaunchedEffect(isToolbarVisible) {
+        if (isToolbarVisible && !hasShownImmersiveTooltip) {
+            kaleidoVm.markImmersiveTooltipShown()
+        }
+    }
+
+    // Auto-dismiss tooltip after 8 seconds if the user never taps it or reveals chrome.
+    LaunchedEffect(Unit) {
+        delay(8_000L)
+        kaleidoVm.markImmersiveTooltipShown()
+    }
+
     // Shape name flash — shown for ~1.5s whenever the cycle button changes the shape.
     val currentShapeName by glView.currentShapeName.collectAsStateWithLifecycle()
     val flashAlpha = remember { Animatable(0f) }
@@ -584,14 +688,30 @@ private fun VisualizerScreen() {
         showAddMenu = true
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgColor)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(BgColor),
     ) {
+        AnimatedVisibility(
+            visible  = isToolbarVisible,
+            enter    = slideInVertically { -it } + fadeIn(),
+            exit     = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).zIndex(1f),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            lastInteractionMs = System.currentTimeMillis()
+                        }
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
         // ── Top control row ────────────────────────────────────────────────────
         Row(
             modifier = Modifier
@@ -660,6 +780,140 @@ private fun VisualizerScreen() {
                         text    = { Text("Pick from Gallery") },
                         onClick = { showAddMenu = false; onPickGallery() },
                     )
+
+                    HorizontalDivider()
+
+                    // "Exclude default skins" checkbox — does not dismiss the menu on tap.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { excludeDefaultSkins = !excludeDefaultSkins }
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked         = excludeDefaultSkins,
+                            onCheckedChange = { excludeDefaultSkins = it },
+                            colors          = CheckboxDefaults.colors(checkedColor = NeonCyan),
+                        )
+                        Text("Exclude default skins", fontSize = 14.sp, color = DimWhite)
+                    }
+
+                    val mosaicSources = remember(registryVersion, excludeDefaultSkins, builtinSnapshotFiles) {
+                        SkinSlotRegistry.filledSlots().map { it.file } +
+                            (if (!excludeDefaultSkins) builtinSnapshotFiles else emptyList())
+                    }
+                    val canMosaic = mosaicSources.isNotEmpty()
+
+                    DropdownMenuItem(
+                        text        = { Text("Random Mosaic") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Shuffle, contentDescription = null)
+                        },
+                        enabled = canMosaic,
+                        onClick = {
+                            showAddMenu = false
+                            scope.launch {
+                                isMosaicGenerating = true
+                                try {
+                                    val builtins = if (excludeDefaultSkins) emptyList()
+                                                  else PainterSnapshotter.ensureBuiltinSnapshots(context)
+                                    val userFiles = SkinSlotRegistry.filledSlots().map { it.file }
+                                    val sources   = userFiles + builtins
+                                    if (sources.isEmpty()) return@launch
+                                    val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
+                                    if (slotIdx == null) {
+                                        Toast.makeText(context, "All 40 slots full — clear one first", Toast.LENGTH_SHORT).show()
+                                        return@launch
+                                    }
+                                    val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
+                                    val outFile = File(dir, "mosaic_${System.currentTimeMillis()}.jpg")
+                                    MosaicGenerator.generateMosaic(context, sources, outFile)
+                                    SkinSlotRegistry.fillSlot(slotIdx, outFile)
+                                    registryVersion++
+                                    currentMode = Mode.UserSlot(slotIdx)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Mosaic failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    isMosaicGenerating = false
+                                }
+                            }
+                        },
+                    )
+
+                    if (!canMosaic) {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                text     = "Add a photo skin first or include defaults.",
+                                color    = DimWhite.copy(alpha = 0.55f),
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+
+                    val canCaptureMosaic = remember(registryVersion, isCapturing) {
+                        !SkinSlotRegistry.isFull() && !isCapturing
+                    }
+                    DropdownMenuItem(
+                        text        = { Text("Capture Mosaic") },
+                        leadingIcon = {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                        },
+                        enabled = canCaptureMosaic,
+                        onClick = {
+                            showAddMenu = false
+                            val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
+                            if (slotIdx == null) {
+                                Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
+                                return@DropdownMenuItem
+                            }
+                            isCapturing     = true
+                            captureProgress = 0
+                            glView.captureMosaicController().requestCapture(
+                                fboWidth  = glView.kaleidoFboWidth(),
+                                fboHeight = glView.kaleidoFboHeight(),
+                                onComplete = { buffers ->
+                                    scope.launch {
+                                        val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
+                                        val outFile = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+                                        try {
+                                            MosaicAssembler.assembleCaptureMosaic(context, buffers, outFile)
+                                            withContext(Dispatchers.Main) {
+                                                SkinSlotRegistry.fillSlot(slotIdx, outFile)
+                                                registryVersion++
+                                                currentMode     = Mode.UserSlot(slotIdx)
+                                                captureProgress = 0
+                                                isCapturing     = false
+                                                Toast.makeText(context, "Captured to slot ${slotIdx + 1}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            withContext(Dispatchers.Main) {
+                                                captureProgress = 0
+                                                isCapturing     = false
+                                                Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                },
+                                onCancel = {
+                                    captureProgress = 0
+                                    isCapturing     = false
+                                },
+                            )
+                        },
+                    )
+                    if (SkinSlotRegistry.isFull()) {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Text(
+                                text     = "All slots full — clear one first.",
+                                color    = DimWhite.copy(alpha = 0.55f),
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+
+                    HorizontalDivider()
+
                     DropdownMenuItem(
                         text    = { Text("Delete a skin", color = Color(0xFFFF4040)) },
                         onClick = { showAddMenu = false; showDeletePicker = true },
@@ -717,54 +971,95 @@ private fun VisualizerScreen() {
                 )
             }
         }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = title,
-                color = NeonCyan,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            Button(
-                onClick = { audioLauncher.launch(arrayOf("audio/*")) },
-                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-            ) {
-                Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-
-            audioFile?.let { af ->
-                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${af.durationMs / 1000}s · ${af.sampleRate} Hz · " +
-                        if (af.channelCount == 1) "mono" else "stereo",
-                    color = DimWhite,
-                    fontSize = 13.sp,
+                    text = title,
+                    color = NeonCyan,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
                 )
-            }
 
-            Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
 
-            Box(modifier = Modifier.alpha(if (isRendererReady) 1f else 0.3f)) {
-                DotsRow(modes, currentMode, currentModeIdx)
-            }
+                Button(
+                    onClick = { audioLauncher.launch(arrayOf("audio/*")) },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                ) {
+                    Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
 
-            Spacer(Modifier.height(10.dp))
+                audioFile?.let { af ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "${af.durationMs / 1000}s · ${af.sampleRate} Hz · " +
+                            if (af.channelCount == 1) "mono" else "stereo",
+                        color = DimWhite,
+                        fontSize = 13.sp,
+                    )
+                }
 
+                Spacer(Modifier.height(10.dp))
+
+                Row(
+                    modifier          = Modifier.alpha(if (isRendererReady) 1f else 0.3f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DotsRow(modes, currentMode, currentModeIdx)
+                    Spacer(Modifier.width(8.dp))
+                    IconButton(
+                        onClick  = {
+                            val next = pickRandomMode(currentMode, SkinSlotRegistry.listAvailableModes())
+                            currentMode = next
+                        },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Default.Shuffle,
+                            contentDescription = "Shuffle skin",
+                            tint               = NeonCyan,
+                            modifier           = Modifier.size(16.dp),
+                        )
+                    }
+                }
+
+                if (audioFile != null && !isLoading && currentMode != Mode.AddSlot) {
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        onClick = {
+                            if (isPlaying) {
+                                mediaPlayer.pause()
+                                isPlaying = false
+                            } else {
+                                try {
+                                    mediaPlayer.start()
+                                    isPlaying = true
+                                } catch (_: IllegalStateException) {}
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPlaying) Color(0xFFFF2D78) else NeonCyan,
+                        ),
+                    ) {
+                        Text(
+                            text = if (isPlaying) "Pause" else "Play",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+                Spacer(Modifier.navigationBarsPadding())
+            }  // end chrome Column
+        }  // end AnimatedVisibility
+
+        // ── Base layer: GL canvas fills the full screen ───────────────────────
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
             // Visualizer canvas / AddSlot prompt.
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 when {
@@ -799,6 +1094,41 @@ private fun VisualizerScreen() {
                         currentMode = currentMode,
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
+
+                // Mosaic generation overlay — shown while generateMosaic() runs.
+                if (isMosaicGenerating) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.65f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(56.dp))
+                            Spacer(Modifier.height(12.dp))
+                            Text("Generating mosaic…", color = DimWhite, fontSize = 16.sp)
+                        }
+                    }
+                }
+
+                // Capture Mosaic HUD — non-blocking corner chip while 64-frame capture runs.
+                if (isCapturing) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 16.dp, end = 16.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.65f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            text       = "Capturing… ($captureProgress/64)",
+                            color      = NeonCyan,
+                            fontSize   = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
 
                 // Loading overlay — fades out once the GL renderer signals ready.
@@ -848,6 +1178,10 @@ private fun VisualizerScreen() {
                             }
                             .pointerInput(currentMode) {
                                 detectTapGestures(
+                                    onTap = {
+                                        lastInteractionMs = System.currentTimeMillis()
+                                        isToolbarVisible  = true
+                                    },
                                     onLongPress = {
                                         if (currentMode is Mode.UserSlot) showSlotSheet = true
                                         else glView.triggerPainterStatsDump()
@@ -885,34 +1219,47 @@ private fun VisualizerScreen() {
                     )
                 }
             }
+        }  // end base layer Box
 
-            Spacer(Modifier.height(16.dp))
-
-            if (audioFile != null && !isLoading && currentMode != Mode.AddSlot) {
-                Button(
-                    onClick = {
-                        if (isPlaying) {
-                            mediaPlayer.pause()
-                            isPlaying = false
-                        } else {
-                            try {
-                                mediaPlayer.start()
-                                isPlaying = true
-                            } catch (_: IllegalStateException) {}
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isPlaying) Color(0xFFFF2D78) else NeonCyan,
-                    ),
-                ) {
+        // ── First-launch immersive tooltip ────────────────────────────────────
+        if (!hasShownImmersiveTooltip && !isToolbarVisible) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .zIndex(2f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(alpha = 0.80f))
+                    .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .padding(24.dp)
+                    .clickable { kaleidoVm.markImmersiveTooltipShown() },
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector        = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint               = NeonCyan,
+                        modifier           = Modifier.size(48.dp),
+                    )
                     Text(
-                        text = if (isPlaying) "Pause" else "Play",
-                        color = Color.Black,
+                        text       = "Swipe down from the top edge",
+                        color      = NeonCyan,
                         fontWeight = FontWeight.Bold,
+                        fontSize   = 16.sp,
+                    )
+                    Text(
+                        text     = "to reveal controls",
+                        color    = Color.White,
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text      = "Tap to dismiss",
+                        color     = DimWhite,
+                        fontSize  = 11.sp,
+                        fontStyle = FontStyle.Italic,
                     )
                 }
             }
-
         }
     }
 
@@ -1105,9 +1452,17 @@ private fun VisualizerScreen() {
                 onDistortionEnabledChange    = { kaleidoVm.setDistortionEnabled(it) },
                 onDistortionAmplitudeChange  = { kaleidoVm.setDistortionAmplitude(it) },
                 onDistortionFrequencyChange  = { kaleidoVm.setDistortionFrequency(it) },
+                onDistortionPlusEnabledChange = { kaleidoVm.setDistortionPlusEnabled(it) },
+                onDistortionPlusYawChange    = { kaleidoVm.setDistortionPlusYaw(it) },
+                onDistortionPlusPitchChange  = { kaleidoVm.setDistortionPlusPitch(it) },
+                onDistortionPlusRollChange   = { kaleidoVm.setDistortionPlusRoll(it) },
                 onPartyEnabledChange         = { kaleidoVm.setPartyEnabled(it) },
                 onRandomEnabledChange        = { kaleidoVm.setRandomEnabled(it) },
                 onPartyIntensityChange       = { kaleidoVm.setPartyIntensity(it) },
+                onBassZoomIntensityChange    = { kaleidoVm.setBassZoomIntensity(it) },
+                onContrastChange             = { kaleidoVm.setContrast(it) },
+                onContrastPassesChange       = { kaleidoVm.setContrastPasses(it) },
+                onSaturationChange           = { kaleidoVm.setSaturation(it) },
                 onToggleLock                 = { kaleidoVm.toggleLock(it) },
             )
         }
@@ -1340,9 +1695,17 @@ private fun KaleidoSettingsContent(
     onDistortionEnabledChange: (Boolean) -> Unit,
     onDistortionAmplitudeChange: (Float) -> Unit,
     onDistortionFrequencyChange: (Float) -> Unit,
+    onDistortionPlusEnabledChange: (Boolean) -> Unit,
+    onDistortionPlusYawChange: (Float) -> Unit,
+    onDistortionPlusPitchChange: (Float) -> Unit,
+    onDistortionPlusRollChange: (Float) -> Unit,
     onPartyEnabledChange: (Boolean) -> Unit,
     onRandomEnabledChange: (Boolean) -> Unit,
     onPartyIntensityChange: (Float) -> Unit,
+    onBassZoomIntensityChange: (Float) -> Unit,
+    onContrastChange: (Float) -> Unit,
+    onContrastPassesChange: (Int) -> Unit,
+    onSaturationChange: (Float) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -1479,6 +1842,39 @@ private fun KaleidoSettingsContent(
                 settings.zoomMultiplier > 1.05f -> "Zoomed in (less border)"
                 settings.zoomMultiplier < 0.95f -> "Zoomed out (more border)"
                 else                            -> "Default"
+            },
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        Spacer(Modifier.height(8.dp))
+        Text("Bass pulse", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text       = "${(settings.bassZoomIntensity * 100).toInt()}%",
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
+            )
+            Slider(
+                value         = settings.bassZoomIntensity,
+                onValueChange = { onBassZoomIntensityChange(it) },
+                valueRange    = 0f..1f,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            LockIconButton(LockableParam.BASS_ZOOM_INTENSITY, settings.lockedParams, onToggleLock)
+        }
+        Text(
+            text  = when {
+                settings.bassZoomIntensity < 0.05f -> "Off — no bass modulation"
+                settings.bassZoomIntensity > 0.75f -> "Max pulse"
+                else                               -> "Bass-driven zoom pulse"
             },
             style    = MaterialTheme.typography.bodySmall,
             color    = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1724,6 +2120,199 @@ private fun KaleidoSettingsContent(
                 )
                 LockIconButton(LockableParam.DISTORTION_FREQUENCY, settings.lockedParams, onToggleLock)
             }
+        }
+
+        // Distortion Plus
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onDistortionPlusEnabledChange(!settings.distortionPlusEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Distortion Plus", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Spherical warp of the rendered scene",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LockIconButton(LockableParam.DISTORTION_PLUS_ENABLED, settings.lockedParams, onToggleLock)
+            Switch(
+                checked         = settings.distortionPlusEnabled,
+                onCheckedChange = { onDistortionPlusEnabledChange(it) },
+            )
+        }
+
+        if (settings.distortionPlusEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Yaw",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.distortionPlusYaw,
+                    onValueChange = { onDistortionPlusYawChange(it) },
+                    valueRange    = -180f..180f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${settings.distortionPlusYaw.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.DISTORTION_PLUS_YAW, settings.lockedParams, onToggleLock)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Pitch",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.distortionPlusPitch,
+                    onValueChange = { onDistortionPlusPitchChange(it) },
+                    valueRange    = -90f..90f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${settings.distortionPlusPitch.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.DISTORTION_PLUS_PITCH, settings.lockedParams, onToggleLock)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Roll",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.distortionPlusRoll,
+                    onValueChange = { onDistortionPlusRollChange(it) },
+                    valueRange    = -180f..180f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${settings.distortionPlusRoll.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.DISTORTION_PLUS_ROLL, settings.lockedParams, onToggleLock)
+            }
+        }
+
+        // ── COLOR SHAPING ─────────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        SettingsSectionHeader("Color shaping")
+
+        // Contrast
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Contrast",
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = Color.White,
+                modifier = Modifier.width(80.dp),
+            )
+            Slider(
+                value         = settings.contrast,
+                onValueChange = { onContrastChange(it) },
+                valueRange    = 0f..2f,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            Text(
+                text       = String.format("%.2f", settings.contrast),
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
+            )
+            LockIconButton(LockableParam.CONTRAST, settings.lockedParams, onToggleLock)
+        }
+
+        // Contrast passes
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Passes",
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = Color.White,
+                modifier = Modifier.width(80.dp),
+            )
+            Slider(
+                value         = settings.contrastPasses.toFloat(),
+                onValueChange = { onContrastPassesChange(it.toInt().coerceIn(1, 6)) },
+                valueRange    = 1f..6f,
+                steps         = 4,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            Text(
+                text       = "${settings.contrastPasses}",
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
+            )
+            LockIconButton(LockableParam.CONTRAST_PASSES, settings.lockedParams, onToggleLock)
+        }
+
+        // Saturation
+        Spacer(Modifier.height(4.dp))
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Saturation",
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = Color.White,
+                modifier = Modifier.width(80.dp),
+            )
+            Slider(
+                value         = settings.saturation,
+                onValueChange = { onSaturationChange(it) },
+                valueRange    = 0f..2f,
+                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            Text(
+                text       = String.format("%.2f", settings.saturation),
+                style      = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color      = Color.White,
+                modifier   = Modifier.width(48.dp),
+            )
+            LockIconButton(LockableParam.SATURATION, settings.lockedParams, onToggleLock)
         }
 
         // ── PARTY / RANDOM ───────────────────────────────────────────────────

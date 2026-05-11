@@ -56,6 +56,14 @@ class Mp4Exporter(
     private val partyEnabled: Boolean = false,
     private val randomEnabled: Boolean = false,
     private val partyIntensity: Float = 0.5f,
+    private val bassZoomIntensity: Float = 0.5f,
+    private val contrast: Float = 1.0f,
+    private val contrastPasses: Int = 1,
+    private val saturation: Float = 1.0f,
+    private val distortionPlusEnabled: Boolean = false,
+    private val distortionPlusYaw: Float = 0f,
+    private val distortionPlusPitch: Float = 0f,
+    private val distortionPlusRoll: Float = 0f,
     private val lockedParams: Set<LockableParam> = emptySet(),
 ) {
     companion object {
@@ -189,7 +197,15 @@ class Mp4Exporter(
         renderer.colorizeHue          = colorizeHue
         renderer.distortionEnabled    = distortionEnabled
         renderer.distortionAmplitude  = distortionAmplitude
-        renderer.distortionFrequency  = distortionFrequency
+        renderer.distortionFrequency      = distortionFrequency
+        renderer.distortionPlusEnabled    = distortionPlusEnabled
+        renderer.distortionPlusYaw        = distortionPlusYaw
+        renderer.distortionPlusPitch      = distortionPlusPitch
+        renderer.distortionPlusRoll       = distortionPlusRoll
+        renderer.bassZoomIntensity        = bassZoomIntensity
+        renderer.contrast             = contrast
+        renderer.contrastPasses       = contrastPasses
+        renderer.saturation           = saturation
 
         val exportPartyEngine  = PartyEngine  { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
         exportPartyEngine.enabled   = partyEnabled

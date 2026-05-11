@@ -55,6 +55,14 @@ fun applyRandomChangeToView(
         LockableParam.DISTORTION_AMPLITUDE -> view.setDistortionAmplitude(random.nextFloat())
         LockableParam.DISTORTION_FREQUENCY -> view.setDistortionFrequency(0.5f + random.nextFloat() * 7.5f)
         LockableParam.ZOOM_MULTIPLIER      -> view.setZoomMultiplier(0.5f + random.nextFloat() * 1.0f)
+        LockableParam.BASS_ZOOM_INTENSITY  -> view.setBassZoomIntensity(random.nextFloat())
+        LockableParam.CONTRAST             -> view.setContrast(0.5f + random.nextFloat() * 1.5f)
+        LockableParam.CONTRAST_PASSES      -> view.setContrastPasses(1 + random.nextInt(6))
+        LockableParam.SATURATION           -> view.setSaturation(random.nextFloat() * 2f)
+        LockableParam.DISTORTION_PLUS_ENABLED -> view.setDistortionPlusEnabled(random.nextDouble() < 0.4)
+        LockableParam.DISTORTION_PLUS_YAW  -> view.setDistortionPlusYaw(-180f + random.nextFloat() * 360f)
+        LockableParam.DISTORTION_PLUS_PITCH -> view.setDistortionPlusPitch(-45f + random.nextFloat() * 90f)
+        LockableParam.DISTORTION_PLUS_ROLL -> view.setDistortionPlusRoll(-180f + random.nextFloat() * 360f)
     }
 }
 
@@ -81,5 +89,13 @@ internal fun applyRandomChangeToRenderer(
         LockableParam.DISTORTION_AMPLITUDE -> renderer.distortionAmplitude = random.nextFloat()
         LockableParam.DISTORTION_FREQUENCY -> renderer.distortionFrequency = 0.5f + random.nextFloat() * 7.5f
         LockableParam.ZOOM_MULTIPLIER      -> renderer.zoomMultiplier = 0.5f + random.nextFloat() * 1.0f
+        LockableParam.BASS_ZOOM_INTENSITY  -> renderer.bassZoomIntensity = random.nextFloat()
+        LockableParam.CONTRAST             -> renderer.contrast = 0.5f + random.nextFloat() * 1.5f
+        LockableParam.CONTRAST_PASSES      -> renderer.contrastPasses = 1 + random.nextInt(6)
+        LockableParam.SATURATION           -> renderer.saturation = random.nextFloat() * 2f
+        LockableParam.DISTORTION_PLUS_ENABLED -> renderer.distortionPlusEnabled = random.nextDouble() < 0.4
+        LockableParam.DISTORTION_PLUS_YAW  -> renderer.distortionPlusYaw = -180f + random.nextFloat() * 360f
+        LockableParam.DISTORTION_PLUS_PITCH -> renderer.distortionPlusPitch = -45f + random.nextFloat() * 90f
+        LockableParam.DISTORTION_PLUS_ROLL -> renderer.distortionPlusRoll = -180f + random.nextFloat() * 360f
     }
 }
