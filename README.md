@@ -17,6 +17,7 @@ Pick an audio file (or tap the mic), choose a skin, and watch a rotating 3D shap
 - **Audio-reactive** — beat-driven shake on X/Y axes, four-ribbon collapse animation driven by bass/mid/treble/overall; beat sensitivity tunable per skin
 - **Live mic** — tap the mic button to use the microphone instead of a file; pauses playback automatically, resumes on stop
 - **Skin modes** — 5 built-in skins + up to 40 user-uploaded photo slots; swipe left/right to navigate, long-press to replace or clear
+- **Skin Shuffle** — tap the ⇌ button next to the skin picker dots to jump to a random skin from your available set
 
 **User skin pipeline:** pick from gallery or camera → 16:1 crop screen with live preview → validation (size, resolution, aspect) → mirror-seam JPEG saved to `filesDir`. Texture updates instantly; no stripe-by-stripe repaint delay.
 
@@ -31,7 +32,17 @@ All settings live in a bottom sheet (⚙ top-right). Everything persists in Data
 - **Frame shape** — None, Circle, Square, Rounded, Hexagon, Octagon, Star (SDF-rendered, anti-aliased)
 - **Frame color** — 3-stage picker: hue/saturation wheel → lightness → alpha, with live preview
 - **Zoom multiplier** — 0.5×–1.5× applied on top of per-shape defaults; 150% = more zoomed in, 50% = more zoomed out; Reset snaps to 1.0×
+- **Contrast** — 0–2.0 post-process pass; values above 1.0 crunch blacks and clip whites
+- **Saturation** — 0–2.0; above 1.0 oversaturates, 0 = monochrome
+- **Contrast passes** — 1–6 iterations of the contrast curve applied in sequence; higher counts produce a posterization effect
+- **Distortion Plus** — spherical warp injected before the kaleido fold; three independent axes (yaw, pitch, roll) bend the geometry into asymmetric forms without breaking the fold symmetry
 - **Semi-transparent sheet** — visualizer stays visible behind the settings panel so you can see changes live while dragging sliders
+
+---
+
+## Immersive mode
+
+On launch the visualizer fills the entire screen with zero chrome — no title, no buttons, no skin picker, no system bars. Tap the screen to reveal the controls; they slide down from the top with a dark scrim and auto-hide after 3 seconds of no interaction. Works in portrait and landscape. On first launch a tooltip explains the gesture once, then never shows again.
 
 ---
 
@@ -48,7 +59,7 @@ Tap ↓ → Export Wizard. Renders offline at the same framerate as the live vie
 - **Output** — MediaStore registration; file appears in the system Gallery immediately
 - **Speed** — hardware H.264 runs 4K at 4–5× real-time on Galaxy S25
 
-Kaleido settings (fold count, frame shape, zoom) apply to the export. Per-export overrides available in the wizard.
+Kaleido settings (fold count, frame shape, zoom, contrast, saturation, Distortion Plus) apply to the export. Per-export overrides available in the wizard.
 
 ---
 
