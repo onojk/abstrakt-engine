@@ -614,6 +614,7 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
                 append(" | ${(settings.partyIntensity * 100).toInt()}%")
         }
         SummaryRow("Auto", partyLine)
+        SummaryRow("Beat reactivity", "${(settings.beatReactivity * 100).toInt()}%")
         SummaryRow("Frame shape", settings.frameShape.name)
         Row(
             modifier          = Modifier.fillMaxWidth(),

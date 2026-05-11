@@ -106,6 +106,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var shapeFboW        = 0
     private var shapeFboH        = 0
     @Volatile var zoomMultiplier      = 1.0f
+    @Volatile var beatReactivity      = 0.25f  // 0=silent, 1=full; master beat-magnitude scale
     @Volatile var bassZoomIntensity   = 0.5f   // 0=off, 1=max bass-driven zoom pulse
     private var smoothedBass          = 0.0f   // EMA of snap.bands[0]; GL thread only
     @Volatile var contrast            = 1.0f   // 0..2, 1=passthrough
@@ -591,11 +592,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 beatDecay = if (snap.isBeat) 1.0f
                             else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
                                 .coerceAtLeast(0f)
+                val scaledBeatDecayDrift = beatDecay * beatReactivity
                 driftState.update(timeSec, snap.bands)
                 prog.use()
                 audioUniforms.applyToProgram(prog, timeSec)
                 driftState.applyToProgram(prog)
-                prog.setFloat("u_beat_decay", beatDecay)
+                prog.setFloat("u_beat_decay", scaledBeatDecayDrift)
                 drawQuad()
             }
 
@@ -642,6 +644,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                     else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
                         .coerceAtLeast(0f)
         if (snap.isBeat) Log.d(TAG, "BEAT! peak=${snap.peak} beatDecay=$beatDecay")
+        val scaledBeatDecay = beatDecay * beatReactivity
 
         val cProg = cycloneProgram ?: return
         val pProg = painterPrograms[audioUniforms.activePainter] ?: return
@@ -655,7 +658,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         kaleidoRotationRad = (kaleidoRotationRad + dt * 0.05f).rem(twoPi)
 
         // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
-        val shakeAmp = beatDecay * 0.35f
+        val shakeAmp = beatDecay * 0.35f * beatReactivity
         val shakeX   = (shakeAmp * Math.sin(timeSec * 53.0)).toFloat()
         val shakeY   = (shakeAmp * Math.sin(timeSec * 45.0 + 1.3)).toFloat()
 
@@ -733,7 +736,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         pProg.setFloat("u_time", timeSec)
         pProg.setFloat("u_peak", snap.peak)
         pProg.setFloat("u_beat", if (snap.isBeat) 1f else 0f)
-        pProg.setFloat("u_beat_decay", beatDecay)
+        pProg.setFloat("u_beat_decay", scaledBeatDecay)
         pProg.setFloat("u_playback_fraction", audioUniforms.playbackFraction)
         pProg.setFloat("u_cyclone_angle", shapeAngleRad)
         pProg.setFloatArray("u_bands", snap.bands)

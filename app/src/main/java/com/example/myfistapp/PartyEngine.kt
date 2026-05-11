@@ -63,6 +63,7 @@ fun applyRandomChangeToView(
         LockableParam.DISTORTION_PLUS_YAW  -> view.setDistortionPlusYaw(-180f + random.nextFloat() * 360f)
         LockableParam.DISTORTION_PLUS_PITCH -> view.setDistortionPlusPitch(-45f + random.nextFloat() * 90f)
         LockableParam.DISTORTION_PLUS_ROLL -> view.setDistortionPlusRoll(-180f + random.nextFloat() * 360f)
+        LockableParam.BEAT_REACTIVITY      -> { /* Master sensitivity: locked-by-user-only, not randomized. */ }
     }
 }
 
@@ -97,5 +98,6 @@ internal fun applyRandomChangeToRenderer(
         LockableParam.DISTORTION_PLUS_YAW  -> renderer.distortionPlusYaw = -180f + random.nextFloat() * 360f
         LockableParam.DISTORTION_PLUS_PITCH -> renderer.distortionPlusPitch = -45f + random.nextFloat() * 90f
         LockableParam.DISTORTION_PLUS_ROLL -> renderer.distortionPlusRoll = -180f + random.nextFloat() * 360f
+        LockableParam.BEAT_REACTIVITY      -> { /* never randomized */ }
     }
 }

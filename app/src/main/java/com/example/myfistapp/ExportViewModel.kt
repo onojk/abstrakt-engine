@@ -291,6 +291,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     distortionPlusPitch          = kaleido.distortionPlusPitch,
                     distortionPlusRoll           = kaleido.distortionPlusRoll,
                     lockedParams                 = kaleido.lockedParams,
+                    beatReactivity               = kaleido.beatReactivity,
                 )
                 val result = exporter.export { fraction, phase ->
                     _progressValue.value = fraction

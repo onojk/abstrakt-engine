@@ -26,6 +26,7 @@ data class ExportConfig(
     val distortionPlusYaw: Float = 0f,
     val distortionPlusPitch: Float = 0f,
     val distortionPlusRoll: Float = 0f,
+    val beatReactivity: Float = 0.25f,
 )
 
 sealed class AudioSource {

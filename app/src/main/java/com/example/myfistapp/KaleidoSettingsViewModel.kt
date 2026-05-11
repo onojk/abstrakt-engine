@@ -119,6 +119,10 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setDistortionPlusRoll(value) }
     }
 
+    fun setBeatReactivity(value: Float) {
+        viewModelScope.launch { store.setBeatReactivity(value) }
+    }
+
     fun toggleLock(param: LockableParam) {
         val current = settings.value.lockedParams
         val updated = if (param in current) current - param else current + param

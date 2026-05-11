@@ -65,6 +65,7 @@ class Mp4Exporter(
     private val distortionPlusPitch: Float = 0f,
     private val distortionPlusRoll: Float = 0f,
     private val lockedParams: Set<LockableParam> = emptySet(),
+    private val beatReactivity: Float = 0.25f,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -203,6 +204,7 @@ class Mp4Exporter(
         renderer.distortionPlusPitch      = distortionPlusPitch
         renderer.distortionPlusRoll       = distortionPlusRoll
         renderer.bassZoomIntensity        = bassZoomIntensity
+        renderer.beatReactivity           = beatReactivity
         renderer.contrast             = contrast
         renderer.contrastPasses       = contrastPasses
         renderer.saturation           = saturation

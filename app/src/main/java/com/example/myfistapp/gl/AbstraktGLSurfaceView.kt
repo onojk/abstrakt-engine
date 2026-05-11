@@ -76,6 +76,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setDistortionPlusYaw(value: Float)       { queueEvent { renderer.distortionPlusYaw = value } }
     fun setDistortionPlusPitch(value: Float)     { queueEvent { renderer.distortionPlusPitch = value } }
     fun setDistortionPlusRoll(value: Float)      { queueEvent { renderer.distortionPlusRoll = value } }
+    fun setBeatReactivity(value: Float)          { queueEvent { renderer.beatReactivity = value } }
     val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
     fun captureMosaicController(): CaptureMosaicController = renderer.captureController
     fun kaleidoFboWidth(): Int  = renderer.kaleidoTexW

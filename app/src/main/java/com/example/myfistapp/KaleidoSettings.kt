@@ -20,6 +20,7 @@ enum class LockableParam {
     DISTORTION_PLUS_YAW,
     DISTORTION_PLUS_PITCH,
     DISTORTION_PLUS_ROLL,
+    BEAT_REACTIVITY,
 }
 
 enum class FrameShape {
@@ -54,6 +55,7 @@ data class KaleidoSettings(
     val distortionPlusYaw: Float = 0f,     // -180..180 degrees
     val distortionPlusPitch: Float = 0f,   // -90..90 degrees
     val distortionPlusRoll: Float = 0f,    // -180..180 degrees
+    val beatReactivity: Float = 0.25f,       // 0=silent, 1=full; scales all beat-driven magnitudes
     val lockedParams: Set<LockableParam> = emptySet(),
 )
 
