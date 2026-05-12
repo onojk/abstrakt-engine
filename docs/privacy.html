@@ -58,13 +58,19 @@
 
 <p>If you purchase abstrakt engine Pro (the one-time $2.99 in-app purchase to remove ads), the AdMob SDK is disabled and no advertising data leaves your device.</p>
 
+<h3>Camera (optional, on-device only)</h3>
+
+<p>abstrakt engine lets you capture photos with your device camera to use as custom skins/textures for the visualizer. When you tap the camera button, the app requests camera permission via the standard Android permission dialog. You can decline, and the rest of the app continues to work normally.</p>
+
+<p>Photos captured this way are stored on your device only. They are <strong>not</strong> uploaded to any server, shared with any third party, or transmitted off your device. If you choose not to grant camera permission, you can still use existing photos from your device as custom skins via the image picker.</p>
+
 <h2>What the app does NOT do</h2>
 
 <ul>
   <li>The app does <strong>not</strong> require an internet connection for visualization or export. Both work entirely offline.</li>
   <li>The app does <strong>not</strong> have user accounts, sign-in, or any identity system.</li>
   <li>The app does <strong>not</strong> use third-party analytics beyond what's described above (Firebase Crashlytics for crash reports, AdMob for advertising on the free version).</li>
-  <li>The app does <strong>not</strong> access your contacts, location (beyond AdMob's IP-derived city-level estimate), calendar, messages, or any personal data on your device beyond files you explicitly select.</li>
+  <li>The app does <strong>not</strong> access your contacts, location (beyond AdMob's IP-derived city-level estimate), calendar, messages, or any personal data on your device beyond files you explicitly select and photos you capture with the camera.</li>
   <li>The app does <strong>not</strong> sell, share, or transmit your audio, photos, custom skins, or exported videos to any third party.</li>
 </ul>
 
@@ -76,6 +82,7 @@
   <li><strong>READ_MEDIA_AUDIO</strong> — to open audio files you select from your device storage</li>
   <li><strong>READ_MEDIA_IMAGES</strong> — to open image files you choose as custom skins</li>
   <li><strong>RECORD_AUDIO</strong> — to visualize live microphone input when you tap the mic button</li>
+  <li><strong>CAMERA</strong> — to capture photos for use as custom visualizer skins, only when you tap the camera button</li>
   <li><strong>INTERNET</strong> — required by Firebase Crashlytics and Google AdMob (both need network access); the core visualizer and export run without it</li>
 </ul>
 
