@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -1251,8 +1250,8 @@ private fun VisualizerScreen() {
                     )
                 }
 
-                val canCaptureMosaic = remember(registryVersion, isCapturing) {
-                    !SkinSlotRegistry.isFull() && !isCapturing
+                val canCaptureMosaic = remember(registryVersion, isCapturing, currentMode) {
+                    !SkinSlotRegistry.isFull() && !isCapturing && currentMode != Mode.AddSlot
                 }
                 TextButton(
                     onClick = {
@@ -1303,7 +1302,14 @@ private fun VisualizerScreen() {
                     Spacer(Modifier.width(8.dp))
                     Text("Capture Mosaic", color = if (canCaptureMosaic) NeonCyan else DimWhite, fontSize = 16.sp)
                 }
-                if (SkinSlotRegistry.isFull()) {
+                if (currentMode == Mode.AddSlot) {
+                    Text(
+                        "Capture Mosaic samples the live visualizer — pick a skin first.",
+                        color    = DimWhite.copy(alpha = 0.55f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                } else if (SkinSlotRegistry.isFull()) {
                     Text(
                         "All slots full — clear one first.",
                         color    = DimWhite.copy(alpha = 0.55f),
