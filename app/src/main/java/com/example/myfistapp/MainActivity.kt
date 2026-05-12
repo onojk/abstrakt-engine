@@ -1351,8 +1351,30 @@ private fun VisualizerScreen() {
                 showCapturePickerFor = false
                 currentMode = mode
                 scope.launch {
-                    delay(100)
-                    startCaptureMosaic()
+                    // Wait for GL to finish remounting and create the FBO.
+                    // GlCanvas reattaches on currentMode change; FBO is allocated
+                    // in onSurfaceChanged which fires after layout.
+                    val timeoutMs = 3000L
+                    val pollMs    = 50L
+                    var waited    = 0L
+                    var fboReady  = false
+                    while (waited < timeoutMs) {
+                        if (glView.kaleidoFboWidth() > 0 && glView.kaleidoFboHeight() > 0) {
+                            fboReady = true
+                            break
+                        }
+                        delay(pollMs)
+                        waited += pollMs
+                    }
+                    if (fboReady) {
+                        startCaptureMosaic()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Couldn't capture — try again in a moment",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                 }
             },
             onDismiss = { showCapturePickerFor = false },
