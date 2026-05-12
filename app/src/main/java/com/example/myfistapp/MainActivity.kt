@@ -67,6 +67,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -2491,6 +2492,58 @@ private fun KaleidoSettingsContent(
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+
+        // ── PRIVACY ──────────────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Privacy",
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        val privacyContext = androidx.compose.ui.platform.LocalContext.current
+        var crashReportingEnabled by remember {
+            mutableStateOf(CrashReporting.isEnabled(privacyContext))
+        }
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Crash reporting",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
+                )
+                Text(
+                    "Anonymous crash data helps fix bugs. No personal info, no skins, no audio.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = crashReportingEnabled,
+                onCheckedChange = { newVal ->
+                    crashReportingEnabled = newVal
+                    CrashReporting.setEnabled(privacyContext, newVal)
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = NeonCyan,
+                    checkedTrackColor = NeonCyan.copy(alpha = 0.4f),
+                ),
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { throw RuntimeException("Crashlytics test crash from settings") },
+            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4040)),
+        ) {
+            Text("TEST CRASH (dev only — remove before launch)", color = Color.White)
         }
 
         Spacer(Modifier.height(96.dp))

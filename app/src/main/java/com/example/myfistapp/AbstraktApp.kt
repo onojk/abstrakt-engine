@@ -1,6 +1,7 @@
 package com.example.myfistapp
 
 import android.app.Application
+import android.content.Context
 import com.example.myfistapp.gl.PainterSnapshotter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,5 +20,15 @@ class AbstraktApp : Application() {
         File(filesDir, "camera_captures").listFiles()?.forEach { it.delete() }
         // Pre-warm built-in painter snapshots so first Random Mosaic tap is instant.
         appScope.launch { PainterSnapshotter.ensureBuiltinSnapshots(this@AbstraktApp) }
+
+        // Crashlytics: respect user's opt-out preference. Default = enabled.
+        // SharedPreferences is used (not DataStore) because we need a synchronous
+        // read here before any coroutine context exists.
+        val prefs = applicationContext.getSharedPreferences(
+            "abstrakt_prefs", Context.MODE_PRIVATE
+        )
+        val crashReportingEnabled = prefs.getBoolean("crash_reporting_enabled", true)
+        com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
+            .setCrashlyticsCollectionEnabled(crashReportingEnabled)
     }
 }
