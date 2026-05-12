@@ -14,7 +14,14 @@ private const val USER_SKINS_DIR = "user_skins"
 data class FilledSlot(val index: Int, val file: File, val createdAt: Long)
 
 object SkinSlotRegistry {
-    private const val MAX_SLOTS = 40
+    // Maximum user-creatable skin slots. Lowered from 40 → 10 to keep
+    // the dots-row navigation manageable without aggressive scrolling.
+    // NOTE: lowering this value would silently drop user slots at
+    // higher indices on next launch. Since the app has not yet shipped,
+    // this is safe; for any post-launch cap change, add a migration
+    // step that consolidates higher-indexed slots into lower indices
+    // before dropping the array size.
+    private const val MAX_SLOTS = 10
     private val slots: Array<FilledSlot?> = arrayOfNulls(MAX_SLOTS)
     private var appContext: Context? = null
 

@@ -833,10 +833,18 @@ private fun VisualizerScreen() {
                 Spacer(Modifier.height(10.dp))
 
                 Row(
-                    modifier          = Modifier.alpha(if (isRendererReady) 1f else 0.3f),
-                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(if (isRendererReady) 1f else 0.3f),
+                    verticalAlignment    = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
                 ) {
-                    DotsRow(modes, currentMode, currentModeIdx)
+                    DotsRow(
+                        modes = modes,
+                        currentMode = currentMode,
+                        currentModeIdx = currentModeIdx,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     Spacer(Modifier.width(8.dp))
                     IconButton(
                         onClick  = {
@@ -1149,7 +1157,7 @@ private fun VisualizerScreen() {
     // ── Add-skin bottom sheet ─────────────────────────────────────────────────
     fun startCaptureMosaic() {
         val slotIdx = SkinSlotRegistry.firstEmptySlotIndex() ?: run {
-            Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "All 10 slots full", Toast.LENGTH_SHORT).show()
             return
         }
         isCapturing     = true
@@ -1260,7 +1268,7 @@ private fun VisualizerScreen() {
                                 if (sources.isEmpty()) return@launch
                                 val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
                                 if (slotIdx == null) {
-                                    Toast.makeText(context, "All 40 slots full — clear one first", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "All 10 slots full — clear one first", Toast.LENGTH_SHORT).show()
                                     return@launch
                                 }
                                 val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
@@ -1555,7 +1563,12 @@ private fun launchCamera(context: Context, onReady: (File, Uri) -> Unit) {
 // ── Dots indicator ────────────────────────────────────────────────────────────
 
 @Composable
-private fun DotsRow(modes: List<Mode>, currentMode: Mode, currentModeIdx: Int) {
+private fun DotsRow(
+    modes: List<Mode>,
+    currentMode: Mode,
+    currentModeIdx: Int,
+    modifier: Modifier = Modifier,
+) {
     val hasEllipsis = SkinSlotRegistry.hasMoreEmptyAfterFirst()
     val totalDots   = modes.size + (if (hasEllipsis) 3 else 0)
     val listState   = rememberLazyListState()
@@ -1565,7 +1578,10 @@ private fun DotsRow(modes: List<Mode>, currentMode: Mode, currentModeIdx: Int) {
     }
 
     if (totalDots <= 12) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             modes.forEachIndexed { i, mode -> ModeDot(mode, active = i == currentModeIdx) }
             if (hasEllipsis) {
                 repeat(3) {
@@ -1580,6 +1596,7 @@ private fun DotsRow(modes: List<Mode>, currentMode: Mode, currentModeIdx: Int) {
         }
     } else {
         LazyRow(
+            modifier = modifier,
             state = listState,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
