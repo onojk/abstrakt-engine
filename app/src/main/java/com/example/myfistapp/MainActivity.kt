@@ -233,8 +233,9 @@ private fun VisualizerScreen() {
     var isMosaicGenerating   by remember { mutableStateOf(false) }
     var builtinSnapshotFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     // Capture Mosaic state
-    var isCapturing     by remember { mutableStateOf(false) }
-    var captureProgress by remember { mutableIntStateOf(0) }
+    var isCapturing          by remember { mutableStateOf(false) }
+    var captureProgress      by remember { mutableIntStateOf(0) }
+    var showCapturePickerFor by remember { mutableStateOf(false) }
     // Kaleido settings sheet — survives rotation via ViewModel StateFlow.
     val isSettingsOpen by kaleidoVm.isSheetOpen.collectAsStateWithLifecycle()
 
@@ -1145,6 +1146,46 @@ private fun VisualizerScreen() {
     }
 
     // ── Add-skin bottom sheet ─────────────────────────────────────────────────
+    fun startCaptureMosaic() {
+        val slotIdx = SkinSlotRegistry.firstEmptySlotIndex() ?: run {
+            Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
+            return
+        }
+        isCapturing     = true
+        captureProgress = 0
+        glView.captureMosaicController().requestCapture(
+            fboWidth  = glView.kaleidoFboWidth(),
+            fboHeight = glView.kaleidoFboHeight(),
+            onComplete = { buffers ->
+                scope.launch {
+                    val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
+                    val outFile = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+                    try {
+                        MosaicAssembler.assembleCaptureMosaic(context, buffers, outFile)
+                        withContext(Dispatchers.Main) {
+                            SkinSlotRegistry.fillSlot(slotIdx, outFile)
+                            registryVersion++
+                            currentMode     = Mode.UserSlot(slotIdx)
+                            captureProgress = 0
+                            isCapturing     = false
+                            Toast.makeText(context, "Captured to slot ${slotIdx + 1}", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            captureProgress = 0
+                            isCapturing     = false
+                            Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            },
+            onCancel = {
+                captureProgress = 0
+                isCapturing     = false
+            },
+        )
+    }
+
     if (showAddSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAddSheet = false },
@@ -1250,49 +1291,16 @@ private fun VisualizerScreen() {
                     )
                 }
 
-                val canCaptureMosaic = remember(registryVersion, isCapturing, currentMode) {
-                    !SkinSlotRegistry.isFull() && !isCapturing && currentMode != Mode.AddSlot
+                val canCaptureMosaic = remember(registryVersion, isCapturing) {
+                    !SkinSlotRegistry.isFull() && !isCapturing
                 }
                 TextButton(
                     onClick = {
                         showAddSheet = false
-                        val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
-                        if (slotIdx == null) {
-                            Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
+                        if (currentMode == Mode.AddSlot) {
+                            showCapturePickerFor = true
                         } else {
-                            isCapturing     = true
-                            captureProgress = 0
-                            glView.captureMosaicController().requestCapture(
-                                fboWidth  = glView.kaleidoFboWidth(),
-                                fboHeight = glView.kaleidoFboHeight(),
-                                onComplete = { buffers ->
-                                    scope.launch {
-                                        val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
-                                        val outFile = File(dir, "capture_${System.currentTimeMillis()}.jpg")
-                                        try {
-                                            MosaicAssembler.assembleCaptureMosaic(context, buffers, outFile)
-                                            withContext(Dispatchers.Main) {
-                                                SkinSlotRegistry.fillSlot(slotIdx, outFile)
-                                                registryVersion++
-                                                currentMode     = Mode.UserSlot(slotIdx)
-                                                captureProgress = 0
-                                                isCapturing     = false
-                                                Toast.makeText(context, "Captured to slot ${slotIdx + 1}", Toast.LENGTH_SHORT).show()
-                                            }
-                                        } catch (e: Exception) {
-                                            withContext(Dispatchers.Main) {
-                                                captureProgress = 0
-                                                isCapturing     = false
-                                                Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                },
-                                onCancel = {
-                                    captureProgress = 0
-                                    isCapturing     = false
-                                },
-                            )
+                            startCaptureMosaic()
                         }
                     },
                     enabled  = canCaptureMosaic,
@@ -1302,14 +1310,7 @@ private fun VisualizerScreen() {
                     Spacer(Modifier.width(8.dp))
                     Text("Capture Mosaic", color = if (canCaptureMosaic) NeonCyan else DimWhite, fontSize = 16.sp)
                 }
-                if (currentMode == Mode.AddSlot) {
-                    Text(
-                        "Capture Mosaic samples the live visualizer — pick a skin first.",
-                        color    = DimWhite.copy(alpha = 0.55f),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                } else if (SkinSlotRegistry.isFull()) {
+                if (SkinSlotRegistry.isFull()) {
                     Text(
                         "All slots full — clear one first.",
                         color    = DimWhite.copy(alpha = 0.55f),
@@ -1338,6 +1339,24 @@ private fun VisualizerScreen() {
                 )
             }
         }
+    }
+
+    // ── Capture-skin picker (launched from AddSlot) ───────────────────────────
+    if (showCapturePickerFor) {
+        SkinPickerDialog(
+            builtinSnapshots = builtinSnapshotFiles,
+            userSlots        = SkinSlotRegistry.filledSlots(),
+            purpose          = SkinPickerPurpose.CAPTURE,
+            onPick           = { _, _, mode ->
+                showCapturePickerFor = false
+                currentMode = mode
+                scope.launch {
+                    delay(100)
+                    startCaptureMosaic()
+                }
+            },
+            onDismiss = { showCapturePickerFor = false },
+        )
     }
 
     // ── Clear confirmation dialog ─────────────────────────────────────────────

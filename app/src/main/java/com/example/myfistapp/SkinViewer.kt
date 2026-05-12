@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -63,6 +64,8 @@ sealed class ViewerMode {
     object ReadOnly  : ViewerMode()
     object PreCommit : ViewerMode()
 }
+
+enum class SkinPickerPurpose { VIEW, CAPTURE }
 
 @Composable
 fun SkinViewerDialog(
@@ -240,8 +243,9 @@ fun SkinViewerDialog(
 fun SkinPickerDialog(
     builtinSnapshots: List<File>,
     userSlots: List<FilledSlot>,
-    onPick: (File, String) -> Unit,
+    onPick: (File, String, Mode) -> Unit,
     onDismiss: () -> Unit,
+    purpose: SkinPickerPurpose = SkinPickerPurpose.VIEW,
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -260,7 +264,10 @@ fun SkinPickerDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                Text("View skins", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(
+                    if (purpose == SkinPickerPurpose.CAPTURE) "Capture from which skin?" else "View skins",
+                    color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                )
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = DimWhite)
                 }
@@ -277,12 +284,12 @@ fun SkinPickerDialog(
                             modifier = Modifier.padding(bottom = 6.dp),
                         )
                     }
-                    items(builtinSnapshots) { file ->
+                    itemsIndexed(builtinSnapshots) { idx, file ->
                         val name  = file.nameWithoutExtension
                             .split("_")
                             .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
                         val label = "Built-in: $name"
-                        SkinPickerRow(file = file, label = name) { onPick(file, label) }
+                        SkinPickerRow(file = file, label = name) { onPick(file, label, Mode.Builtin(idx + 1)) }
                     }
                 }
                 if (userSlots.isNotEmpty()) {
@@ -298,7 +305,7 @@ fun SkinPickerDialog(
                     }
                     items(userSlots, key = { it.index }) { slot ->
                         val label = "Slot ${slot.index + 1}"
-                        SkinPickerRow(file = slot.file, label = label) { onPick(slot.file, label) }
+                        SkinPickerRow(file = slot.file, label = label) { onPick(slot.file, label, Mode.UserSlot(slot.index)) }
                     }
                 }
                 if (builtinSnapshots.isEmpty() && userSlots.isEmpty()) {
