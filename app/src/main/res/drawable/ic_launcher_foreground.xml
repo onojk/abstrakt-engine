@@ -5,16 +5,41 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Triangular mandala outline (NeonCyan stroke) -->
+    <!-- Wedge 1: 0° to 60° (right to upper-right), red -->
     <path
-        android:strokeColor="#00E5FF"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M 54,22 L 81.7,70 L 26.3,70 Z" />
+        android:fillColor="#FF3030"
+        android:pathData="M 54,54 L 86,54 L 70,26.3 Z" />
 
-    <!-- Amber center dot -->
+    <!-- Wedge 2: 60° to 120° (upper-right to upper-left), orange -->
     <path
-        android:fillColor="#FFB020"
-        android:pathData="M 54,54 m -3,0 a 3,3 0 1,0 6,0 a 3,3 0 1,0 -6,0" />
+        android:fillColor="#FF8C00"
+        android:pathData="M 54,54 L 70,26.3 L 38,26.3 Z" />
+
+    <!-- Wedge 3: 120° to 180° (upper-left to left), red -->
+    <path
+        android:fillColor="#FF3030"
+        android:pathData="M 54,54 L 38,26.3 L 22,54 Z" />
+
+    <!-- Wedge 4: 180° to 240° (left to lower-left), orange -->
+    <path
+        android:fillColor="#FF8C00"
+        android:pathData="M 54,54 L 22,54 L 38,81.7 Z" />
+
+    <!-- Wedge 5: 240° to 300° (lower-left to lower-right), red -->
+    <path
+        android:fillColor="#FF3030"
+        android:pathData="M 54,54 L 38,81.7 L 70,81.7 Z" />
+
+    <!-- Wedge 6: 300° to 360° (lower-right to right), orange -->
+    <path
+        android:fillColor="#FF8C00"
+        android:pathData="M 54,54 L 70,81.7 L 86,54 Z" />
+
+    <!-- Center: blue outer ring + yellow inner core -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M 54,54 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M 54,54 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0" />
 </vector>
