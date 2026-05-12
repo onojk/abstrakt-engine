@@ -12,6 +12,8 @@ import java.io.File
 
 class AbstraktApp : Application() {
 
+    val billingManager by lazy { BillingManager(this) }
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -35,5 +37,7 @@ class AbstraktApp : Application() {
         com.google.android.gms.ads.MobileAds.initialize(this) { initStatus ->
             Log.d("AdMob", "AdMob initialized: ${initStatus.adapterStatusMap}")
         }
+
+        billingManager.initialize()
     }
 }

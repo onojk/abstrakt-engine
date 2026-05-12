@@ -102,6 +102,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.onojk.abstrakt.audio.AudioFile
@@ -182,8 +183,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyFistAppTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    val billingMgr = (LocalContext.current.applicationContext as AbstraktApp).billingManager
+                    val hasPro by billingMgr.hasProState.collectAsState()
                     VisualizerScreen(
-                        onExportSuccess = { interstitialAdManager.show(this@MainActivity) },
+                        onExportSuccess = {
+                            if (!hasPro) interstitialAdManager.show(this@MainActivity)
+                        },
                     )
                 }
             }
@@ -875,8 +880,10 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 }
 
                 // ── AdMob banner ──────────────────────────────────────────────────
-                val showAds = remember { mutableStateOf(true) }  // wired to IAP in Phase 2
-                if (showAds.value) {
+                val billingManager = (LocalContext.current.applicationContext as AbstraktApp).billingManager
+                val hasPro by billingManager.hasProState.collectAsState()
+                val showAds = !hasPro
+                if (showAds) {
                     Spacer(Modifier.height(8.dp))
                     AndroidView(
                         modifier = Modifier.fillMaxWidth(),
@@ -2537,6 +2544,47 @@ private fun KaleidoSettingsContent(
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+
+        // ── SUPPORT THE DEVELOPER ────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Support the developer",
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        val billingManager = (LocalContext.current.applicationContext as AbstraktApp).billingManager
+        val hasPro by billingManager.hasProState.collectAsState()
+        val activity = LocalContext.current as? Activity
+
+        if (hasPro) {
+            Text(
+                "Thanks for supporting abstrakt engine!",
+                color = NeonCyan,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        } else {
+            Column {
+                Text(
+                    "Free version is ad-supported. One-time $2.99 purchase removes all ads.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        activity?.let { billingManager.launchPurchaseFlow(it) }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                ) {
+                    Text("Remove ads — $2.99", color = Color.Black, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
 
         // ── PRIVACY ──────────────────────────────────────────────────────────
