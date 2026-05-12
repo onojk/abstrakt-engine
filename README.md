@@ -66,13 +66,15 @@ Kaleido settings (fold count, frame shape, zoom) apply to the export. Per-export
 
 ---
 
-## Privacy
+## Pricing & Privacy
 
-The app runs entirely on your device. No internet required for visualization or export. No accounts, no analytics, no tracking, no ads.
+abstrakt engine is **free with ads** — banner during use, plus a short interstitial after each MP4 export. A **one-time $2.99 in-app purchase removes all ads** permanently. No subscriptions, no recurring charges.
 
-The only outbound network traffic is anonymous crash reports via [Firebase Crashlytics](https://firebase.google.com/products/crashlytics), which you can disable at any time in Settings → Privacy. Crash reports include stack trace, device model, OS version, and anonymous installation ID — no user content, no audio, no skins, no exports.
+The app runs entirely on your device for visualization and export. Outbound network traffic is limited to:
+- Anonymous crash reports via [Firebase Crashlytics](https://firebase.google.com/products/crashlytics) (opt-out in Settings → Privacy)
+- Advertising data via [Google AdMob](https://admob.google.com/) on the free version (eliminated when you purchase the ad-removal IAP)
 
-Full policy: [onojk.github.io/abstrakt-engine/privacy.html](https://onojk.github.io/abstrakt-engine/privacy.html)
+No accounts, no sign-in, no user content ever leaves your device. Full details: [privacy policy](https://onojk.github.io/abstrakt-engine/privacy.html).
 
 ---
 
