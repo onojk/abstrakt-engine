@@ -1,6 +1,19 @@
 # abstrakt-engine
 
-A native Android kaleidoscope visualizer that wraps 3D geometry in audio-reactive painter textures, folds it into mandalas in real time, and exports the result as H.264 video. Sister project to [onojk/abstrakt](https://github.com/onojk/abstrakt) — same aesthetic, native Android, 120 Hz.
+A native Android kaleidoscope visualizer that wraps 3D geometry in audio-reactive painter textures, folds it into mandalas in real time, and exports the result as H.264 video. Part of a trilogy with [onojk/abstrakt](https://github.com/onojk/abstrakt) (Python, the original) and [onojk/abstrakt-deck](https://github.com/onojk/abstrakt-deck) (Rust desktop).
+
+**🎬 Coming to Google Play soon.** ⭐ Star this repo to be notified when it ships.
+
+---
+
+## See it in motion
+
+Two demo videos showing the visualizer running live on a Galaxy S25, with original Suno-generated music:
+
+- [**Nimbus Window**](https://www.youtube.com/watch?v=Mv3p7AFTOwg) — 6:18, ambient
+- [**Pressure Becomes Groove**](https://www.youtube.com/watch?v=xTa7JNNjmf0) — 4:11, beat-driven
+
+Every frame is the actual app responding to audio in real time. No post-processing.
 
 ---
 
@@ -14,12 +27,11 @@ Pick an audio file (or tap the mic), choose a skin, and watch a rotating 3D shap
 
 - **3D geometry** — cylinder and sphere, each with its own tilt axis, rotation speed, and kaleido zoom factor tuned so they fill the frame consistently
 - **Painter textures** — a 4096×256 FBO painted stripe-by-stripe per revolution; painters include hue stripe, audio paint, print head, static image, and skin photo
-- **Audio-reactive** — beat-driven shake on X/Y axes, four-ribbon collapse animation driven by bass/mid/treble/overall; beat sensitivity tunable per skin
+- **Audio-reactive** — beat-driven shake on X/Y axes, four-ribbon collapse animation driven by bass/mid/treble/overall; beat sensitivity tunable
 - **Live mic** — tap the mic button to use the microphone instead of a file; pauses playback automatically, resumes on stop
-- **Skin modes** — 5 built-in skins + up to 40 user-uploaded photo slots; swipe left/right to navigate, long-press to replace or clear
-- **Skin Shuffle** — tap the ⇌ button next to the skin picker dots to jump to a random skin from your available set
+- **Skin modes** — 5 built-in skins + up to 10 user-created mosaic skins; swipe left/right to navigate
 
-**User skin pipeline:** pick from gallery or camera → 16:1 crop screen with live preview → validation (size, resolution, aspect) → mirror-seam JPEG saved to `filesDir`. Texture updates instantly; no stripe-by-stripe repaint delay.
+**User skin pipeline:** capture a mosaic from any moment of the visualizer → preview the 8×8 grid → keep or try again. Each captured mosaic becomes a reusable audio-reactive skin.
 
 ---
 
@@ -32,17 +44,8 @@ All settings live in a bottom sheet (⚙ top-right). Everything persists in Data
 - **Frame shape** — None, Circle, Square, Rounded, Hexagon, Octagon, Star (SDF-rendered, anti-aliased)
 - **Frame color** — 3-stage picker: hue/saturation wheel → lightness → alpha, with live preview
 - **Zoom multiplier** — 0.5×–1.5× applied on top of per-shape defaults; 150% = more zoomed in, 50% = more zoomed out; Reset snaps to 1.0×
-- **Contrast** — 0–2.0 post-process pass; values above 1.0 crunch blacks and clip whites
-- **Saturation** — 0–2.0; above 1.0 oversaturates, 0 = monochrome
-- **Contrast passes** — 1–6 iterations of the contrast curve applied in sequence; higher counts produce a posterization effect
-- **Distortion Plus** — spherical warp injected before the kaleido fold; three independent axes (yaw, pitch, roll) bend the geometry into asymmetric forms without breaking the fold symmetry
+- **Beat reactivity** — master sensitivity knob (0–100%) scales all beat-driven animations uniformly
 - **Semi-transparent sheet** — visualizer stays visible behind the settings panel so you can see changes live while dragging sliders
-
----
-
-## Immersive mode
-
-On launch the visualizer fills the entire screen with zero chrome — no title, no buttons, no skin picker, no system bars. Tap the screen to reveal the controls; they slide down from the top with a dark scrim and auto-hide after 3 seconds of no interaction. Works in portrait and landscape. On first launch a tooltip explains the gesture once, then never shows again.
 
 ---
 
@@ -59,27 +62,39 @@ Tap ↓ → Export Wizard. Renders offline at the same framerate as the live vie
 - **Output** — MediaStore registration; file appears in the system Gallery immediately
 - **Speed** — hardware H.264 runs 4K at 4–5× real-time on Galaxy S25
 
-Kaleido settings (fold count, frame shape, zoom, contrast, saturation, Distortion Plus) apply to the export. Per-export overrides available in the wizard.
+Kaleido settings (fold count, frame shape, zoom) apply to the export. Per-export overrides available in the wizard.
+
+---
+
+## Privacy
+
+The app runs entirely on your device. No internet required for visualization or export. No accounts, no analytics, no tracking, no ads.
+
+The only outbound network traffic is anonymous crash reports via [Firebase Crashlytics](https://firebase.google.com/products/crashlytics), which you can disable at any time in Settings → Privacy. Crash reports include stack trace, device model, OS version, and anonymous installation ID — no user content, no audio, no skins, no exports.
+
+Full policy: [onojk.github.io/abstrakt-engine/privacy.html](https://onojk.github.io/abstrakt-engine/privacy.html)
 
 ---
 
 ## Tech
 
-| | |
-|---|---|
+|  |  |
+| --- | --- |
 | Language | Kotlin |
 | UI | Jetpack Compose + Material 3 |
 | Rendering | OpenGL ES 3.0, GLSL ES 3.0 |
 | Persistence | DataStore Preferences |
 | Video | MediaCodec + MediaMuxer |
-| Target | API 34+, tested on Galaxy S25 (120 Hz) |
-| Repo | [github.com/onojk/abstrakt-engine](https://github.com/onojk/abstrakt-engine) |
+| Crash reporting | Firebase Crashlytics (opt-out) |
+| Target | minSdk 33, tested on Galaxy S25 (120 Hz) |
 
 ---
 
 ## Built with Claude Code
 
-This project is a collaboration between Jonathan Kendall and [Claude Code](https://claude.ai/code) (Anthropic). Prompts drive each feature slice; Claude writes the code; Jonathan tests on-device and approves. Claude is credited as co-author in every commit. The visualizer output shows up on YouTube — search for abstrakt to find it.
+This project is a collaboration between Jonathan Kendall and [Claude Code](https://claude.ai/code) (Anthropic). Prompts drive each feature slice; Claude writes the code; Jonathan tests on-device and approves. Claude is credited as co-author in every commit.
+
+See also the [vibecoding lessons post on r/VibeCodingAIHub](https://www.reddit.com/r/VibeCodingAIHub/) describing what worked and what didn't across all three abstrakt projects.
 
 ---
 
