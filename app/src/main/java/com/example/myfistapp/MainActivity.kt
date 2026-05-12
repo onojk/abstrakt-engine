@@ -63,8 +63,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
@@ -131,7 +129,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -168,14 +165,6 @@ sealed class Mode {
 internal val BgColor  = Color(0xFF0A0A0F)
 internal val NeonCyan = Color(0xFF00FFFF)
 internal val DimWhite = Color(0x99FFFFFF)
-
-sealed class PreviewState {
-    abstract val tempFile: File
-    data class Random(override val tempFile: File, val excludeDefaults: Boolean) : PreviewState()
-    data class Capture(override val tempFile: File) : PreviewState()
-}
-
-data class ViewingSkin(val file: File, val label: String)
 
 
 class MainActivity : ComponentActivity() {
@@ -228,10 +217,6 @@ private fun VisualizerScreen() {
     // Delete-skin flow.
     var showDeletePicker      by remember { mutableStateOf(false) }
     var skinSlotPendingDelete by remember { mutableStateOf<Int?>(null) }
-    // Skin viewer / pre-commit preview flow.
-    var showSkinPicker   by remember { mutableStateOf(false) }
-    var viewingSkin      by remember { mutableStateOf<ViewingSkin?>(null) }
-    var previewingMosaic by remember { mutableStateOf<PreviewState?>(null) }
 
     // Mic state.
     var isMicActive         by remember { mutableStateOf(false) }
@@ -242,8 +227,8 @@ private fun VisualizerScreen() {
     // Long-press sheet state.
     var showSlotSheet    by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
-    // Add-skin menu anchor — whether the dropdown is visible and which anchor triggered it.
-    var showAddMenu          by remember { mutableStateOf(false) }
+    // Add-skin sheet — whether the bottom sheet for adding/managing skins is open.
+    var showAddSheet         by remember { mutableStateOf(false) }
     // Random Mosaic state
     var excludeDefaultSkins  by remember { mutableStateOf(false) }
     var isMosaicGenerating   by remember { mutableStateOf(false) }
@@ -278,15 +263,6 @@ private fun VisualizerScreen() {
 
     val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) { onDispose { mediaPlayer.release() } }
-
-    // Clean up any orphaned mosaic preview temp files on dispose.
-    DisposableEffect(Unit) {
-        onDispose {
-            context.cacheDir.listFiles { f ->
-                f.name.startsWith("mosaic_preview_") || f.name.startsWith("capture_preview_")
-            }?.forEach { it.delete() }
-        }
-    }
 
     // Hoist GL view so it survives mode switches (including AddSlot).
     val glView = remember {
@@ -369,7 +345,6 @@ private fun VisualizerScreen() {
         glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
         glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
         glView.setBassZoomIntensity(kaleidoSettings.bassZoomIntensity)
-        glView.setBeatReactivity(kaleidoSettings.beatReactivity)
         glView.setContrast(kaleidoSettings.contrast)
         glView.setContrastPasses(kaleidoSettings.contrastPasses)
         glView.setSaturation(kaleidoSettings.saturation)
@@ -403,7 +378,6 @@ private fun VisualizerScreen() {
             glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
             glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
             glView.setBassZoomIntensity(kaleidoSettings.bassZoomIntensity)
-            glView.setBeatReactivity(kaleidoSettings.beatReactivity)
             glView.setContrast(kaleidoSettings.contrast)
             glView.setContrastPasses(kaleidoSettings.contrastPasses)
             glView.setSaturation(kaleidoSettings.saturation)
@@ -709,7 +683,7 @@ private fun VisualizerScreen() {
 
     // ── Add-skin entry point — always shows menu; delete option works even when full ──
     fun onAddSkinTapped() {
-        showAddMenu = true
+        showAddSheet = true
     }
 
     Box(
@@ -791,167 +765,6 @@ private fun VisualizerScreen() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text("+", color = NeonCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-                DropdownMenu(
-                    expanded         = showAddMenu,
-                    onDismissRequest = { showAddMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text    = { Text("Take Photo") },
-                        onClick = { showAddMenu = false; onTakePhoto() },
-                    )
-                    DropdownMenuItem(
-                        text    = { Text("Pick from Gallery") },
-                        onClick = { showAddMenu = false; onPickGallery() },
-                    )
-
-                    HorizontalDivider()
-
-                    // "Exclude default skins" checkbox — does not dismiss the menu on tap.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { excludeDefaultSkins = !excludeDefaultSkins }
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked         = excludeDefaultSkins,
-                            onCheckedChange = { excludeDefaultSkins = it },
-                            colors          = CheckboxDefaults.colors(checkedColor = NeonCyan),
-                        )
-                        Text("Exclude default skins", fontSize = 14.sp, color = DimWhite)
-                    }
-
-                    val mosaicSources = remember(registryVersion, excludeDefaultSkins, builtinSnapshotFiles) {
-                        SkinSlotRegistry.filledSlots().map { it.file } +
-                            (if (!excludeDefaultSkins) builtinSnapshotFiles else emptyList())
-                    }
-                    val canMosaic = mosaicSources.isNotEmpty()
-
-                    DropdownMenuItem(
-                        text        = { Text("Random Mosaic") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Shuffle, contentDescription = null)
-                        },
-                        enabled = canMosaic,
-                        onClick = {
-                            showAddMenu = false
-                            scope.launch {
-                                isMosaicGenerating = true
-                                try {
-                                    val builtins  = if (excludeDefaultSkins) emptyList()
-                                                   else PainterSnapshotter.ensureBuiltinSnapshots(context)
-                                    val userFiles = SkinSlotRegistry.filledSlots().map { it.file }
-                                    val sources   = userFiles + builtins
-                                    if (sources.isEmpty()) return@launch
-                                    val tempFile = File(context.cacheDir, "mosaic_preview_${System.currentTimeMillis()}.jpg")
-                                    MosaicGenerator.generateMosaic(context, sources, tempFile)
-                                    previewingMosaic = PreviewState.Random(tempFile, excludeDefaultSkins)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Mosaic failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    isMosaicGenerating = false
-                                }
-                            }
-                        },
-                    )
-
-                    if (!canMosaic) {
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                text     = "Add a photo skin first or include defaults.",
-                                color    = DimWhite.copy(alpha = 0.55f),
-                                fontSize = 12.sp,
-                            )
-                        }
-                    }
-
-                    val canCaptureMosaic = remember(registryVersion, isCapturing) {
-                        !SkinSlotRegistry.isFull() && !isCapturing
-                    }
-                    DropdownMenuItem(
-                        text        = { Text("Capture Mosaic") },
-                        leadingIcon = {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = null)
-                        },
-                        enabled = canCaptureMosaic,
-                        onClick = {
-                            showAddMenu     = false
-                            isCapturing     = true
-                            captureProgress = 0
-                            glView.captureMosaicController().requestCapture(
-                                fboWidth  = glView.kaleidoFboWidth(),
-                                fboHeight = glView.kaleidoFboHeight(),
-                                onComplete = { buffers ->
-                                    scope.launch {
-                                        val tempFile = File(context.cacheDir, "capture_preview_${System.currentTimeMillis()}.jpg")
-                                        try {
-                                            MosaicAssembler.assembleCaptureMosaic(context, buffers, tempFile)
-                                            withContext(Dispatchers.Main) {
-                                                captureProgress  = 0
-                                                isCapturing      = false
-                                                previewingMosaic = PreviewState.Capture(tempFile)
-                                            }
-                                        } catch (e: Exception) {
-                                            withContext(Dispatchers.Main) {
-                                                captureProgress = 0
-                                                isCapturing     = false
-                                                Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                },
-                                onCancel = {
-                                    captureProgress = 0
-                                    isCapturing     = false
-                                },
-                            )
-                        },
-                    )
-                    if (SkinSlotRegistry.isFull()) {
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                            Text(
-                                text     = "All slots full — clear one first.",
-                                color    = DimWhite.copy(alpha = 0.55f),
-                                fontSize = 12.sp,
-                            )
-                        }
-                    }
-
-                    HorizontalDivider()
-
-                    DropdownMenuItem(
-                        text        = { Text("View skins") },
-                        leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) },
-                        onClick = {
-                            showAddMenu  = false
-                            showSkinPicker = true
-                        },
-                    )
-
-                    HorizontalDivider()
-
-                    DropdownMenuItem(
-                        text    = { Text("Delete a skin", color = Color(0xFFFF4040)) },
-                        onClick = { showAddMenu = false; showDeletePicker = true },
-                        leadingIcon = {
-                            Icon(
-                                imageVector        = Icons.Default.Delete,
-                                contentDescription = null,
-                                tint               = Color(0xFFFF4040),
-                            )
-                        },
-                        enabled = SkinSlotRegistry.filledSlots().isNotEmpty(),
-                    )
-                    Box(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text  = "Photos: 1024×256 to 8000×6000, max 50 MB",
-                            color = DimWhite.copy(alpha = 0.5f),
-                            fontSize = 14.sp,
-                        )
-                    }
-                }
             }
 
             // ⚙ Settings button
@@ -1089,13 +902,14 @@ private fun VisualizerScreen() {
                         onSwipeEnd   = {
                             val idx      = updatedModeIdx.value
                             val modeList = updatedModes.value
-                            currentMode = when {
+                            val next = when {
                                 dragAccum >  swipeThresholdPx ->
                                     modeList.getOrElse(idx - 1) { modeList.first() }
                                 dragAccum < -swipeThresholdPx ->
                                     modeList.getOrElse(idx + 1) { modeList.last() }
                                 else -> currentMode
                             }
+                            currentMode = next
                             dragAccum = 0f
                         },
                     )
@@ -1182,13 +996,14 @@ private fun VisualizerScreen() {
                                     onDragEnd = {
                                         val idx      = updatedModeIdx.value
                                         val modeList = updatedModes.value
-                                        currentMode = when {
+                                        val next = when {
                                             dragAccum >  swipeThresholdPx ->
                                                 modeList.getOrElse(idx - 1) { modeList.first() }
                                             dragAccum < -swipeThresholdPx ->
                                                 modeList.getOrElse(idx + 1) { modeList.last() }
                                             else -> currentMode
                                         }
+                                        currentMode = next
                                         dragAccum = 0f
                                     },
                                     onHorizontalDrag = { _, delta -> dragAccum += delta },
@@ -1307,7 +1122,7 @@ private fun VisualizerScreen() {
                     onClick = {
                         showSlotSheet = false
                         slotMode?.let { replacingSlotIndex = it.slotIndex }
-                        showAddMenu = true
+                        showAddSheet = true
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -1326,6 +1141,195 @@ private fun VisualizerScreen() {
                     Text("Cancel", color = DimWhite, fontSize = 16.sp)
                 }
                 Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
+    // ── Add-skin bottom sheet ─────────────────────────────────────────────────
+    if (showAddSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddSheet = false },
+            sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor   = Color(0xFF1A1A24),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Add a Skin",
+                    color      = NeonCyan,
+                    fontSize   = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier   = Modifier.padding(bottom = 8.dp),
+                )
+                TextButton(
+                    onClick  = { showAddSheet = false; onTakePhoto() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Take Photo", color = NeonCyan, fontSize = 16.sp)
+                }
+                TextButton(
+                    onClick  = { showAddSheet = false; onPickGallery() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Pick from Gallery", color = NeonCyan, fontSize = 16.sp)
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { excludeDefaultSkins = !excludeDefaultSkins }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked         = excludeDefaultSkins,
+                        onCheckedChange = { excludeDefaultSkins = it },
+                        colors          = CheckboxDefaults.colors(checkedColor = NeonCyan),
+                    )
+                    Text("Exclude default skins", fontSize = 14.sp, color = DimWhite)
+                }
+
+                val mosaicSources = remember(registryVersion, excludeDefaultSkins, builtinSnapshotFiles) {
+                    SkinSlotRegistry.filledSlots().map { it.file } +
+                        (if (!excludeDefaultSkins) builtinSnapshotFiles else emptyList())
+                }
+                val canMosaic = mosaicSources.isNotEmpty()
+
+                TextButton(
+                    onClick = {
+                        showAddSheet = false
+                        scope.launch {
+                            isMosaicGenerating = true
+                            try {
+                                val builtins = if (excludeDefaultSkins) emptyList()
+                                              else PainterSnapshotter.ensureBuiltinSnapshots(context)
+                                val userFiles = SkinSlotRegistry.filledSlots().map { it.file }
+                                val sources   = userFiles + builtins
+                                if (sources.isEmpty()) return@launch
+                                val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
+                                if (slotIdx == null) {
+                                    Toast.makeText(context, "All 40 slots full — clear one first", Toast.LENGTH_SHORT).show()
+                                    return@launch
+                                }
+                                val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
+                                val outFile = File(dir, "mosaic_${System.currentTimeMillis()}.jpg")
+                                MosaicGenerator.generateMosaic(context, sources, outFile)
+                                SkinSlotRegistry.fillSlot(slotIdx, outFile)
+                                registryVersion++
+                                currentMode = Mode.UserSlot(slotIdx)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Mosaic failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                isMosaicGenerating = false
+                            }
+                        }
+                    },
+                    enabled  = canMosaic,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Shuffle, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Random Mosaic", color = if (canMosaic) NeonCyan else DimWhite, fontSize = 16.sp)
+                }
+                if (!canMosaic) {
+                    Text(
+                        "Add a photo skin first or include defaults.",
+                        color    = DimWhite.copy(alpha = 0.55f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+
+                val canCaptureMosaic = remember(registryVersion, isCapturing) {
+                    !SkinSlotRegistry.isFull() && !isCapturing
+                }
+                TextButton(
+                    onClick = {
+                        showAddSheet = false
+                        val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
+                        if (slotIdx == null) {
+                            Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
+                        } else {
+                            isCapturing     = true
+                            captureProgress = 0
+                            glView.captureMosaicController().requestCapture(
+                                fboWidth  = glView.kaleidoFboWidth(),
+                                fboHeight = glView.kaleidoFboHeight(),
+                                onComplete = { buffers ->
+                                    scope.launch {
+                                        val dir     = File(context.filesDir, "user_skins").also { it.mkdirs() }
+                                        val outFile = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+                                        try {
+                                            MosaicAssembler.assembleCaptureMosaic(context, buffers, outFile)
+                                            withContext(Dispatchers.Main) {
+                                                SkinSlotRegistry.fillSlot(slotIdx, outFile)
+                                                registryVersion++
+                                                currentMode     = Mode.UserSlot(slotIdx)
+                                                captureProgress = 0
+                                                isCapturing     = false
+                                                Toast.makeText(context, "Captured to slot ${slotIdx + 1}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } catch (e: Exception) {
+                                            withContext(Dispatchers.Main) {
+                                                captureProgress = 0
+                                                isCapturing     = false
+                                                Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                },
+                                onCancel = {
+                                    captureProgress = 0
+                                    isCapturing     = false
+                                },
+                            )
+                        }
+                    },
+                    enabled  = canCaptureMosaic,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Capture Mosaic", color = if (canCaptureMosaic) NeonCyan else DimWhite, fontSize = 16.sp)
+                }
+                if (SkinSlotRegistry.isFull()) {
+                    Text(
+                        "All slots full — clear one first.",
+                        color    = DimWhite.copy(alpha = 0.55f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                val canDelete = SkinSlotRegistry.filledSlots().isNotEmpty()
+                TextButton(
+                    onClick  = { showAddSheet = false; showDeletePicker = true },
+                    enabled  = canDelete,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF4040))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Delete a skin", color = Color(0xFFFF4040), fontSize = 16.sp)
+                }
+                Text(
+                    "Photos: 1024×256 to 8000×6000, max 50 MB",
+                    color    = DimWhite.copy(alpha = 0.5f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                )
             }
         }
     }
@@ -1370,122 +1374,6 @@ private fun VisualizerScreen() {
     }
 
     // ── Delete-skin picker dialog ─────────────────────────────────────────────
-    // ── Skin Picker dialog ────────────────────────────────────────────────────
-    if (showSkinPicker) {
-        SkinPickerDialog(
-            builtinSnapshots = builtinSnapshotFiles,
-            userSlots        = SkinSlotRegistry.filledSlots(),
-            onPick           = { file, label ->
-                showSkinPicker = false
-                viewingSkin    = ViewingSkin(file, label)
-            },
-            onDismiss        = { showSkinPicker = false },
-        )
-    }
-
-    // ── Skin Viewer — read-only ───────────────────────────────────────────────
-    viewingSkin?.let { vs ->
-        SkinViewerDialog(
-            skinFile    = vs.file,
-            sourceLabel = vs.label,
-            mode        = ViewerMode.ReadOnly,
-            onClose     = { viewingSkin = null },
-        )
-    }
-
-    // ── Skin Viewer — pre-commit preview ─────────────────────────────────────
-    previewingMosaic?.let { preview ->
-        SkinViewerDialog(
-            skinFile    = preview.tempFile,
-            sourceLabel = when (preview) {
-                is PreviewState.Random  -> "Random Mosaic preview"
-                is PreviewState.Capture -> "Capture Mosaic preview"
-            },
-            mode        = ViewerMode.PreCommit,
-            onClose     = {
-                preview.tempFile.delete()
-                previewingMosaic = null
-            },
-            onKeep      = {
-                scope.launch {
-                    val slotIdx = SkinSlotRegistry.firstEmptySlotIndex()
-                    if (slotIdx == null) {
-                        Toast.makeText(context, "All 40 slots full", Toast.LENGTH_SHORT).show()
-                        preview.tempFile.delete()
-                        previewingMosaic = null
-                        return@launch
-                    }
-                    val dir       = File(context.filesDir, "user_skins").also { it.mkdirs() }
-                    val finalFile = File(dir, preview.tempFile.name)
-                    preview.tempFile.copyTo(finalFile, overwrite = true)
-                    preview.tempFile.delete()
-                    SkinSlotRegistry.fillSlot(slotIdx, finalFile)
-                    registryVersion++
-                    currentMode      = Mode.UserSlot(slotIdx)
-                    previewingMosaic = null
-                }
-            },
-            onTryAgain  = {
-                scope.launch {
-                    isMosaicGenerating = true
-                    try {
-                        when (preview) {
-                            is PreviewState.Random -> {
-                                val oldFile = preview.tempFile
-                                val excl    = preview.excludeDefaults
-                                previewingMosaic = null
-                                val builtins  = if (excl) emptyList()
-                                               else PainterSnapshotter.ensureBuiltinSnapshots(context)
-                                val userFiles = SkinSlotRegistry.filledSlots().map { it.file }
-                                val sources   = userFiles + builtins
-                                if (sources.isEmpty()) return@launch
-                                oldFile.delete()
-                                val newTemp = File(context.cacheDir, "mosaic_preview_${System.currentTimeMillis()}.jpg")
-                                MosaicGenerator.generateMosaic(context, sources, newTemp)
-                                previewingMosaic = PreviewState.Random(newTemp, excl)
-                            }
-                            is PreviewState.Capture -> {
-                                preview.tempFile.delete()
-                                previewingMosaic = null
-                                isCapturing     = true
-                                captureProgress = 0
-                                glView.captureMosaicController().requestCapture(
-                                    fboWidth  = glView.kaleidoFboWidth(),
-                                    fboHeight = glView.kaleidoFboHeight(),
-                                    onComplete = { buffers ->
-                                        scope.launch {
-                                            val newTemp = File(context.cacheDir, "capture_preview_${System.currentTimeMillis()}.jpg")
-                                            try {
-                                                MosaicAssembler.assembleCaptureMosaic(context, buffers, newTemp)
-                                                withContext(Dispatchers.Main) {
-                                                    captureProgress  = 0
-                                                    isCapturing      = false
-                                                    previewingMosaic = PreviewState.Capture(newTemp)
-                                                }
-                                            } catch (e: Exception) {
-                                                withContext(Dispatchers.Main) {
-                                                    captureProgress  = 0
-                                                    isCapturing      = false
-                                                    Toast.makeText(context, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
-                                    },
-                                    onCancel = {
-                                        captureProgress = 0
-                                        isCapturing     = false
-                                    },
-                                )
-                            }
-                        }
-                    } finally {
-                        isMosaicGenerating = false
-                    }
-                }
-            },
-        )
-    }
-
     if (showDeletePicker) {
         val filledSlots = SkinSlotRegistry.filledSlots()
         AlertDialog(
@@ -1594,7 +1482,6 @@ private fun VisualizerScreen() {
                 onRandomEnabledChange        = { kaleidoVm.setRandomEnabled(it) },
                 onPartyIntensityChange       = { kaleidoVm.setPartyIntensity(it) },
                 onBassZoomIntensityChange    = { kaleidoVm.setBassZoomIntensity(it) },
-                onBeatReactivityChange       = { kaleidoVm.setBeatReactivity(it) },
                 onContrastChange             = { kaleidoVm.setContrast(it) },
                 onContrastPassesChange       = { kaleidoVm.setContrastPasses(it) },
                 onSaturationChange           = { kaleidoVm.setSaturation(it) },
@@ -1838,7 +1725,6 @@ private fun KaleidoSettingsContent(
     onRandomEnabledChange: (Boolean) -> Unit,
     onPartyIntensityChange: (Float) -> Unit,
     onBassZoomIntensityChange: (Float) -> Unit,
-    onBeatReactivityChange: (Float) -> Unit,
     onContrastChange: (Float) -> Unit,
     onContrastPassesChange: (Int) -> Unit,
     onSaturationChange: (Float) -> Unit,
@@ -2011,40 +1897,6 @@ private fun KaleidoSettingsContent(
                 settings.bassZoomIntensity < 0.05f -> "Off — no bass modulation"
                 settings.bassZoomIntensity > 0.75f -> "Max pulse"
                 else                               -> "Bass-driven zoom pulse"
-            },
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-
-        // ── AUDIO REACTIVITY ──────────────────────────────────────────────────
-        Spacer(Modifier.height(8.dp))
-        Text("Audio reactivity", style = MaterialTheme.typography.bodyLarge, color = Color.White)
-        Spacer(Modifier.height(4.dp))
-        Row(
-            modifier          = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text       = "${(settings.beatReactivity * 100).toInt()}%",
-                style      = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color      = Color.White,
-                modifier   = Modifier.width(48.dp),
-            )
-            Slider(
-                value         = settings.beatReactivity,
-                onValueChange = { onBeatReactivityChange(it) },
-                valueRange    = 0f..1f,
-                modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
-            )
-            LockIconButton(LockableParam.BEAT_REACTIVITY, settings.lockedParams, onToggleLock)
-        }
-        Text(
-            text  = when {
-                settings.beatReactivity < 0.05f -> "Muted — beats have no effect"
-                settings.beatReactivity > 0.75f -> "High — strong beat response"
-                else                            -> "Scales shake, flash, and beat decay"
             },
             style    = MaterialTheme.typography.bodySmall,
             color    = MaterialTheme.colorScheme.onSurfaceVariant,
