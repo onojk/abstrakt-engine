@@ -59,6 +59,7 @@ dependencies {
     implementation("com.github.wendykierp:JTransforms:3.1")
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.android.gms:play-services-ads:23.6.0")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

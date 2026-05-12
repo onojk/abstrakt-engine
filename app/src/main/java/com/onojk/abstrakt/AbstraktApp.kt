@@ -2,6 +2,7 @@ package com.onojk.abstrakt
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import com.onojk.abstrakt.gl.PainterSnapshotter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,5 +31,9 @@ class AbstraktApp : Application() {
         val crashReportingEnabled = prefs.getBoolean("crash_reporting_enabled", true)
         com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
             .setCrashlyticsCollectionEnabled(crashReportingEnabled)
+
+        com.google.android.gms.ads.MobileAds.initialize(this) { initStatus ->
+            Log.d("AdMob", "AdMob initialized: ${initStatus.adapterStatusMap}")
+        }
     }
 }

@@ -168,8 +168,11 @@ internal val DimWhite = Color(0x99FFFFFF)
 
 
 class MainActivity : ComponentActivity() {
+    private val interstitialAdManager by lazy { InterstitialAdManager(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        interstitialAdManager.preload()
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         WindowInsetsControllerCompat(window, window.decorView).let { ctrl ->
@@ -179,7 +182,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyFistAppTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    VisualizerScreen()
+                    VisualizerScreen(
+                        onExportSuccess = { interstitialAdManager.show(this@MainActivity) },
+                    )
                 }
             }
         }
@@ -188,13 +193,20 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VisualizerScreen() {
+private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     val context       = LocalContext.current
     val scope         = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val exportVm: ExportViewModel = viewModel()
     val isWizardOpen by exportVm.isWizardOpen.collectAsStateWithLifecycle()
+    val exportStep   by exportVm.step.collectAsStateWithLifecycle()
+
+    LaunchedEffect(exportStep) {
+        if (exportStep == WizardStep.DONE) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onExportSuccess() }
+        }
+    }
 
     val kaleidoVm: KaleidoSettingsViewModel = viewModel()
     val kaleidoSettings by kaleidoVm.settings.collectAsStateWithLifecycle()
@@ -860,6 +872,22 @@ private fun VisualizerScreen() {
                             modifier           = Modifier.size(16.dp),
                         )
                     }
+                }
+
+                // ── AdMob banner ──────────────────────────────────────────────────
+                val showAds = remember { mutableStateOf(true) }  // wired to IAP in Phase 2
+                if (showAds.value) {
+                    Spacer(Modifier.height(8.dp))
+                    AndroidView(
+                        modifier = Modifier.fillMaxWidth(),
+                        factory = { ctx ->
+                            com.google.android.gms.ads.AdView(ctx).apply {
+                                setAdSize(com.google.android.gms.ads.AdSize.BANNER)
+                                adUnitId = AdUnits.bannerId
+                                loadAd(com.google.android.gms.ads.AdRequest.Builder().build())
+                            }
+                        },
+                    )
                 }
 
                 if (audioFile != null && !isLoading && currentMode != Mode.AddSlot) {
