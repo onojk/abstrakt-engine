@@ -2538,14 +2538,6 @@ private fun KaleidoSettingsContent(
             )
         }
 
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = { throw RuntimeException("Crashlytics test crash from settings") },
-            colors  = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4040)),
-        ) {
-            Text("TEST CRASH (dev only — remove before launch)", color = Color.White)
-        }
-
         Spacer(Modifier.height(96.dp))
     }
 }
