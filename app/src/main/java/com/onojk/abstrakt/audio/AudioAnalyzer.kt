@@ -7,10 +7,14 @@ data class AudioSnapshot(
     val bands: FloatArray,        // 8 values in [0,1]; logarithmic frequency bands (see BAND_EDGES_HZ)
     val peak: Float,
     val isBeat: Boolean,          // true when any per-band envelope is active (backward compat)
-    val beatLow: Float      = 0f, // BeatEnvelope level for Low band      (60-250 Hz)  ∈ [0,1]
-    val beatMid: Float      = 0f, // BeatEnvelope level for Mid band      (250-2k Hz)  ∈ [0,1]
-    val beatHigh: Float     = 0f, // BeatEnvelope level for High band     (2k-16k Hz)  ∈ [0,1]
-    val beatBroadband: Float = 0f,// BeatEnvelope level for Broadband                  ∈ [0,1]
+    val beatLow: Float       = 0f,  // BeatEnvelope level for Low band      (60-250 Hz)  ∈ [0,1]
+    val beatMid: Float       = 0f,  // BeatEnvelope level for Mid band      (250-2k Hz)  ∈ [0,1]
+    val beatHigh: Float      = 0f,  // BeatEnvelope level for High band     (2k-16k Hz)  ∈ [0,1]
+    val beatBroadband: Float = 0f,  // BeatEnvelope level for Broadband                  ∈ [0,1]
+    // BPM locks ~6-7 s after audio starts (intrinsic to the 6-second autocorrelation window).
+    val currentBpm:    Float? = null, // null until confidence threshold is reached
+    val beatPhase:     Float  = 0f,   // PLL phase ∈ [0, 1); 0 = beat anchor, advances to next
+    val bpmConfidence: Float  = 0f,   // autocorrelation peak / mean; threshold = 1.8
 )
 
 fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
@@ -25,6 +29,9 @@ fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
         beatMid       = audioFile.beatMid[w],
         beatHigh      = audioFile.beatHigh[w],
         beatBroadband = audioFile.beatBroadband[w],
+        currentBpm    = audioFile.bpm,
+        beatPhase     = audioFile.beatPhase[w],
+        bpmConfidence = audioFile.bpmConfidence,
     )
 }
 
@@ -57,6 +64,9 @@ class StreamingAnalyzer {
     private companion object { private const val STREAMING_HISTORY = 360 }
     private var bandDetectors = createBandDetectors(44100, STREAMING_HISTORY)
 
+    // Tempo tracker — nominal chunk = 1/60 s (render-loop call rate).
+    private val tempoTracker = TempoTracker(TempoTracker.STREAMING_CHUNK_SEC)
+
     // Wall-clock origin for nowSec passed to AdaptiveCooldown; reset in beginStreaming.
     private var nanoBase: Long = 0L
     // Previous snapshot time for dtSec envelope advance.
@@ -72,6 +82,7 @@ class StreamingAnalyzer {
         nanoBase      = 0L
         lastNanos     = 0L
         bandDetectors = createBandDetectors(sampleRate, STREAMING_HISTORY)
+        tempoTracker.reset()
         active = true
     }
 
@@ -131,14 +142,24 @@ class StreamingAnalyzer {
         lastNanos  = nowNanos
 
         // ── Per-band onset detection (reads prevSpec before update below) ─────
-        val lvLow    = bandDetectors[BeatBand.Low.ordinal]
-                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
-        val lvMid    = bandDetectors[BeatBand.Mid.ordinal]
-                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
-        val lvHigh   = bandDetectors[BeatBand.High.ordinal]
-                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
-        val lvBroad  = bandDetectors[BeatBand.Broadband.ordinal]
-                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvLow   = bandDetectors[BeatBand.Low.ordinal]
+                          .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvMid   = bandDetectors[BeatBand.Mid.ordinal]
+                          .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvHigh  = bandDetectors[BeatBand.High.ordinal]
+                          .processFlux(spectrum, prevSpec, nowSec, dtSec)
+
+        // Broadband: capture envelope before onset so we can detect fresh triggers for PLL.
+        val broadbandDet = bandDetectors[BeatBand.Broadband.ordinal]
+        val bbEnvBefore  = broadbandDet.envelope.level
+        val lvBroad      = broadbandDet.processFlux(spectrum, prevSpec, nowSec, dtSec)
+
+        // Feed broadband flux to tempo estimator BEFORE onset check (mirrors deck ordering).
+        tempoTracker.processChunk(broadbandDet.lastFlux)
+        // 0.2f: empirical threshold — a fresh trigger always jumps the envelope by ≥ 0.33
+        // (minimum strength 1/3 × 3 = 1 → hold at ~0.33+); 0.2f cleanly separates
+        // fresh triggers from decay.
+        if (lvBroad > bbEnvBefore + 0.2f) tempoTracker.onBroadbandOnset()
 
         prevSpec = spectrum
 
@@ -171,6 +192,9 @@ class StreamingAnalyzer {
             beatMid       = lvMid,
             beatHigh      = lvHigh,
             beatBroadband = lvBroad,
+            currentBpm    = tempoTracker.currentBpm,
+            beatPhase     = tempoTracker.phase,
+            bpmConfidence = tempoTracker.confidence,
         )
     }
 

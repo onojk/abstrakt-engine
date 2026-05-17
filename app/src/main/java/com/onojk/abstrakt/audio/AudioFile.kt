@@ -63,6 +63,11 @@ data class AudioFile(
     val beatMid: FloatArray,               // BeatEnvelope level for Mid band (250-2k Hz)  [numWindows]
     val beatHigh: FloatArray,              // BeatEnvelope level for High band (2k-16k Hz) [numWindows]
     val beatBroadband: FloatArray,         // BeatEnvelope level for Broadband             [numWindows]
+    val beatPhase: FloatArray,             // PLL beat phase ∈ [0,1) per window            [numWindows]
+    // bpm is single-valued for the whole song; tracks dominant tempo.
+    // Songs with dramatic tempo changes will lock to whichever period dominates the first 6s.
+    val bpm: Float?,
+    val bpmConfidence: Float,
 )
 
 suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(Dispatchers.IO) {
@@ -105,6 +110,10 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
     val beatBroadList = mutableListOf<Float>()
     val windowDtSec   = windowMonoFrames.toFloat() / sampleRate
     var windowTimeSec = 0f
+
+    // Tempo tracker — one entry per ~50ms analysis window.
+    val tempoTracker  = TempoTracker(windowDtSec)
+    val beatPhaseList = mutableListOf<Float>()
 
     val windowBuf  = ByteArray(windowBytes)
     var windowPos  = 0
@@ -199,10 +208,20 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
                             beatDets[BeatBand.High.ordinal]
                                 .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
                         )
-                        beatBroadList.add(
-                            beatDets[BeatBand.Broadband.ordinal]
-                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
-                        )
+                        val broadbandDet   = beatDets[BeatBand.Broadband.ordinal]
+                        val bbEnvBefore    = broadbandDet.envelope.level
+                        val lvBroadband    = broadbandDet
+                                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        beatBroadList.add(lvBroadband)
+
+                        // ── Tempo tracking ────────────────────────────────────
+                        // Snapshot phase BEFORE chunk advance so the stored value
+                        // represents the phase at the START of this window.
+                        beatPhaseList.add(tempoTracker.phase)
+                        tempoTracker.processChunk(broadbandDet.lastFlux)
+                        // 0.2f: empirical — a fresh envelope trigger always jumps by ≥ 0.33.
+                        if (lvBroadband > bbEnvBefore + 0.2f) tempoTracker.onBroadbandOnset()
+
                         windowTimeSec += windowDtSec
 
                         rawBandsList.add(bandEnergies(spectrum, sampleRate))
@@ -272,9 +291,12 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
     AudioFile(
         uri, durationMs, sampleRate, channelCount,
         rmsEnvelope, smoothedBands, beatFlags,
-        beatLow      = FloatArray(numWindows) { beatLowList[it] },
-        beatMid      = FloatArray(numWindows) { beatMidList[it] },
-        beatHigh     = FloatArray(numWindows) { beatHighList[it] },
+        beatLow       = FloatArray(numWindows) { beatLowList[it] },
+        beatMid       = FloatArray(numWindows) { beatMidList[it] },
+        beatHigh      = FloatArray(numWindows) { beatHighList[it] },
         beatBroadband = FloatArray(numWindows) { beatBroadList[it] },
+        beatPhase     = FloatArray(numWindows) { beatPhaseList[it] },
+        bpm           = tempoTracker.currentBpm,
+        bpmConfidence = tempoTracker.confidence,
     )
 }

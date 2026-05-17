@@ -91,6 +91,12 @@ class BandBeatDetector(
     val envelope           = BeatEnvelope()
     private val cooldown   = AdaptiveCooldown()
 
+    // 0f initial value is intentional: TempoTracker reads lastFlux before the first
+    // processFlux() call completes, but autocorrelation doesn't fire until the 6-second
+    // history fills (~6s of audio), so the stale 0f is harmless.
+    var lastFlux: Float = 0f
+        private set
+
     /**
      * Compute this band's half-wave-rectified spectral flux (positive bin increases only),
      * update the adaptive threshold, and fire the envelope if onset conditions are met.
@@ -113,6 +119,7 @@ class BandBeatDetector(
             val diff = spectrum[k] - prevSpec[k]
             if (diff > 0f) bandFlux += diff
         }
+        lastFlux = bandFlux
 
         fluxHist.addLast(bandFlux)
         if (fluxHist.size > maxHistory) fluxHist.removeFirst()
