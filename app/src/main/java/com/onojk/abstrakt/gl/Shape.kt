@@ -56,4 +56,7 @@ fun shapeFor(kind: ShapeKind): Shape = when (kind) {
     ShapeKind.Sphere      -> SphereShape()
     ShapeKind.Cube        -> CubeShape()
     ShapeKind.Tetrahedron -> TetrahedronShape()
+    ShapeKind.Icosahedron -> IcosahedronShape()
+    ShapeKind.Urchin      -> UrchinShape()
+    ShapeKind.Caltrop     -> CaltropShape()
 }

@@ -28,7 +28,7 @@ enum class FrameShape {
 }
 
 enum class ShapeKind {
-    Cylinder, Sphere, Cube, Tetrahedron
+    Cylinder, Sphere, Cube, Tetrahedron, Icosahedron, Urchin, Caltrop
 }
 
 data class KaleidoSettings(
