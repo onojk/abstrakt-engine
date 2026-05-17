@@ -1590,8 +1590,10 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onBassZoomIntensityChange    = { kaleidoVm.setBassZoomIntensity(it) },
                 onContrastChange             = { kaleidoVm.setContrast(it) },
                 onContrastPassesChange       = { kaleidoVm.setContrastPasses(it) },
-                onSaturationChange           = { kaleidoVm.setSaturation(it) },
-                onToggleLock                 = { kaleidoVm.toggleLock(it) },
+                onSaturationChange            = { kaleidoVm.setSaturation(it) },
+                onPitchToHueChange            = { kaleidoVm.setPitchToHue(it) },
+                onKeyChangePartyTriggerChange = { kaleidoVm.setKeyChangePartyTrigger(it) },
+                onToggleLock                  = { kaleidoVm.toggleLock(it) },
             )
         }
     }
@@ -1843,6 +1845,8 @@ private fun KaleidoSettingsContent(
     onContrastChange: (Float) -> Unit,
     onContrastPassesChange: (Int) -> Unit,
     onSaturationChange: (Float) -> Unit,
+    onPitchToHueChange: (Boolean) -> Unit,
+    onKeyChangePartyTriggerChange: (Boolean) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -2149,7 +2153,7 @@ private fun KaleidoSettingsContent(
             Switch(checked = settings.colorizeEnabled, onCheckedChange = { onColorizeEnabledChange(it) })
         }
 
-        if (settings.colorizeEnabled) {
+        if (settings.colorizeEnabled && !settings.pitchToHue) {
             Spacer(Modifier.height(4.dp))
             Row(
                 modifier          = Modifier.fillMaxWidth(),
@@ -2558,6 +2562,57 @@ private fun KaleidoSettingsContent(
                 style    = MaterialTheme.typography.bodySmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        // ── AUDIO REACTIVITY ─────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+
+        // Pitch → Hue
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onPitchToHueChange(!settings.pitchToHue) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Pitch → Hue", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Color tracks the dominant note (overrides manual hue)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.pitchToHue, onCheckedChange = { onPitchToHueChange(it) })
+        }
+
+        // Key change trigger
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onKeyChangePartyTriggerChange(!settings.keyChangePartyTrigger) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Key change trigger",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                )
+                Text(
+                    "Party mode fires on key transitions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.keyChangePartyTrigger,
+                onCheckedChange = { onKeyChangePartyTriggerChange(it) },
             )
         }
 

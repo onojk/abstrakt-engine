@@ -123,6 +123,14 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setBeatReactivity(value) }
     }
 
+    fun setPitchToHue(value: Boolean) {
+        viewModelScope.launch { store.setPitchToHue(value) }
+    }
+
+    fun setKeyChangePartyTrigger(value: Boolean) {
+        viewModelScope.launch { store.setKeyChangePartyTrigger(value) }
+    }
+
     fun toggleLock(param: LockableParam) {
         val current = settings.value.lockedParams
         val updated = if (param in current) current - param else current + param
