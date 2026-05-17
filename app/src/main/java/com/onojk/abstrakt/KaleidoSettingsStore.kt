@@ -40,9 +40,11 @@ object KaleidoKeys {
     val DISTORTION_PLUS_YAW    = floatPreferencesKey("distortion_plus_yaw")
     val DISTORTION_PLUS_PITCH  = floatPreferencesKey("distortion_plus_pitch")
     val DISTORTION_PLUS_ROLL   = floatPreferencesKey("distortion_plus_roll")
-    val BEAT_REACTIVITY         = floatPreferencesKey("beat_reactivity")
-    val LOCKED_PARAMS           = stringPreferencesKey("locked_params")
-    val IMMERSIVE_TOOLTIP_SHOWN = booleanPreferencesKey("immersive_tooltip_shown")
+    val BEAT_REACTIVITY          = floatPreferencesKey("beat_reactivity")
+    val LOCKED_PARAMS            = stringPreferencesKey("locked_params")
+    val IMMERSIVE_TOOLTIP_SHOWN  = booleanPreferencesKey("immersive_tooltip_shown")
+    val PITCH_TO_HUE             = booleanPreferencesKey("pitch_to_hue")
+    val KEY_CHANGE_PARTY_TRIGGER = booleanPreferencesKey("key_change_party_trigger")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -76,8 +78,10 @@ class KaleidoSettingsStore(private val context: Context) {
             distortionPlusYaw    = (prefs[KaleidoKeys.DISTORTION_PLUS_YAW] ?: 0f).coerceIn(-180f, 180f),
             distortionPlusPitch  = (prefs[KaleidoKeys.DISTORTION_PLUS_PITCH] ?: 0f).coerceIn(-90f, 90f),
             distortionPlusRoll   = (prefs[KaleidoKeys.DISTORTION_PLUS_ROLL] ?: 0f).coerceIn(-180f, 180f),
-            beatReactivity       = (prefs[KaleidoKeys.BEAT_REACTIVITY] ?: 0.25f).coerceIn(0f, 1f),
-            lockedParams         = prefs[KaleidoKeys.LOCKED_PARAMS]
+            beatReactivity           = (prefs[KaleidoKeys.BEAT_REACTIVITY] ?: 0.25f).coerceIn(0f, 1f),
+            pitchToHue               = prefs[KaleidoKeys.PITCH_TO_HUE]             ?: false,
+            keyChangePartyTrigger    = prefs[KaleidoKeys.KEY_CHANGE_PARTY_TRIGGER] ?: false,
+            lockedParams             = prefs[KaleidoKeys.LOCKED_PARAMS]
                 ?.split(",")
                 ?.filter { it.isNotBlank() }
                 ?.mapNotNull { runCatching { LockableParam.valueOf(it) }.getOrNull() }
@@ -198,6 +202,14 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setBeatReactivity(value: Float) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.BEAT_REACTIVITY] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setPitchToHue(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PITCH_TO_HUE] = value }
+    }
+
+    suspend fun setKeyChangePartyTrigger(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.KEY_CHANGE_PARTY_TRIGGER] = value }
     }
 
     suspend fun setLockedParams(value: Set<LockableParam>) {

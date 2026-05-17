@@ -57,6 +57,8 @@ data class KaleidoSettings(
     val distortionPlusRoll: Float = 0f,    // -180..180 degrees
     val beatReactivity: Float = 0.25f,       // 0=silent, 1=full; scales all beat-driven magnitudes
     val lockedParams: Set<LockableParam> = emptySet(),
+    val pitchToHue: Boolean = false,         // drive colorizeHue from chromaPeak * 30° via EMA glide
+    val keyChangePartyTrigger: Boolean = false, // fire partyEngine on key transitions (0.75 conf, 2 s cooldown)
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

@@ -68,6 +68,13 @@ data class AudioFile(
     // Songs with dramatic tempo changes will lock to whichever period dominates the first 6s.
     val bpm: Float?,
     val bpmConfidence: Float,
+    // Key detection — per window; keyRoot uses -1 as sentinel for "not yet locked".
+    val chroma: Array<FloatArray>,         // L2-normalized 12-pitch-class profile [numWindows][12]
+    val chromaPeak: IntArray,              // dominant pitch class 0–11 [numWindows]
+    val keyRoot: IntArray,                 // -1 = not yet locked; 0=C…11=B [numWindows]
+    val keyIsMajor: BooleanArray,          // [numWindows]
+    val keyConfidence: FloatArray,         // Pearson r of best K-S match [numWindows]
+    val keyChanged: BooleanArray,          // true on the window where lockedKey transitions [numWindows]
 )
 
 suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(Dispatchers.IO) {
@@ -114,6 +121,15 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
     // Tempo tracker — one entry per ~50ms analysis window.
     val tempoTracker  = TempoTracker(windowDtSec)
     val beatPhaseList = mutableListOf<Float>()
+
+    // Key tracker — one entry per ~50ms analysis window.
+    val keyTrackerOffline  = KeyTracker(windowDtSec)
+    val chromaList         = mutableListOf<FloatArray>()
+    val chromaPeakList     = mutableListOf<Int>()
+    val keyRootList        = mutableListOf<Int>()
+    val keyIsMajorList     = mutableListOf<Boolean>()
+    val keyConfidenceList  = mutableListOf<Float>()
+    val keyChangedList     = mutableListOf<Boolean>()
 
     val windowBuf  = ByteArray(windowBytes)
     var windowPos  = 0
@@ -224,6 +240,17 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
 
                         windowTimeSec += windowDtSec
 
+                        // ── Key / pitch detection ─────────────────────────────
+                        val rawChroma   = chromaFromMagnitudes(spectrum, sampleRate)
+                        val keyChanged  = keyTrackerOffline.processChunk(rawChroma)
+                        val lockedKey   = keyTrackerOffline.lockedKey
+                        chromaList.add(keyTrackerOffline.chroma.copyOf())
+                        chromaPeakList.add(keyTrackerOffline.chromaPeak)
+                        keyRootList.add(lockedKey?.first ?: -1)
+                        keyIsMajorList.add(lockedKey?.second ?: true)
+                        keyConfidenceList.add(keyTrackerOffline.confidence)
+                        keyChangedList.add(keyChanged)
+
                         rawBandsList.add(bandEnergies(spectrum, sampleRate))
                         prevSpec  = spectrum
                         windowPos = 0
@@ -298,5 +325,11 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
         beatPhase     = FloatArray(numWindows) { beatPhaseList[it] },
         bpm           = tempoTracker.currentBpm,
         bpmConfidence = tempoTracker.confidence,
+        chroma        = Array(numWindows) { chromaList[it] },
+        chromaPeak    = IntArray(numWindows) { chromaPeakList[it] },
+        keyRoot       = IntArray(numWindows) { keyRootList[it] },
+        keyIsMajor    = BooleanArray(numWindows) { keyIsMajorList[it] },
+        keyConfidence = FloatArray(numWindows) { keyConfidenceList[it] },
+        keyChanged    = BooleanArray(numWindows) { keyChangedList[it] },
     )
 }

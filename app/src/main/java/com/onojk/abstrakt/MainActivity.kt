@@ -154,6 +154,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.firebase.Firebase
+import com.google.firebase.analytics.FirebaseAnalytics
+import com.google.firebase.analytics.analytics
 
 // Carousel mode model — sealed hierarchy for the swipe carousel.
 sealed class Mode {
@@ -173,6 +176,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val firebaseAnalytics = Firebase.analytics
+        firebaseAnalytics.logEvent(FirebaseAnalytics.Event.APP_OPEN, null)
         interstitialAdManager.preload()
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
@@ -240,6 +245,11 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     var wasPlayingBeforeMic by remember { mutableStateOf(false) }
     val micAnalyzer = remember { StreamingAnalyzer() }
     val micCapture  = remember { MicCapture(micAnalyzer) }
+
+    // pitchToHue: EMA hue state — survives recomposition, no Compose state needed.
+    val pitchHueState   = remember { PitchHueState() }
+    // keyChangePartyTrigger: cooldown + previous key state for both render loops.
+    val keyTriggerState = remember { KeyTriggerState() }
 
     // Long-press sheet state.
     var showSlotSheet    by remember { mutableStateOf(false) }
@@ -341,6 +351,9 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 playbackFraction = mediaPlayer.currentPosition.toFloat() / dur
                 val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
                 if (snap?.isBeat == true) partyEngine.onBeat()
+                if (snap != null) {
+                    applyPitchVisuals(snap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
+                }
             }
             delay(16L)
         }
@@ -357,8 +370,9 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         glView.setZoomMultiplier(kaleidoSettings.zoomMultiplier)
         glView.setShapeKind(kaleidoSettings.shapeKind)
         glView.setInvertColors(kaleidoSettings.invertColors)
-        glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled)
-        glView.setColorizeHue(kaleidoSettings.colorizeHue)
+        // pitchToHue overrides colorize: force it on and let the render loop drive the hue.
+        glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled || kaleidoSettings.pitchToHue)
+        if (!kaleidoSettings.pitchToHue) glView.setColorizeHue(kaleidoSettings.colorizeHue)
         glView.setDistortionEnabled(kaleidoSettings.distortionEnabled)
         glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
         glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
@@ -389,8 +403,8 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
             glView.setFrameShape(kaleidoSettings.frameShape)
             glView.setFrameColorArgb(kaleidoSettings.frameColorArgb)
             glView.setInvertColors(kaleidoSettings.invertColors)
-            glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled)
-            glView.setColorizeHue(kaleidoSettings.colorizeHue)
+            glView.setColorizeEnabled(kaleidoSettings.colorizeEnabled || kaleidoSettings.pitchToHue)
+            if (!kaleidoSettings.pitchToHue) glView.setColorizeHue(kaleidoSettings.colorizeHue)
             glView.setDistortionEnabled(kaleidoSettings.distortionEnabled)
             glView.setDistortionAmplitude(kaleidoSettings.distortionAmplitude)
             glView.setDistortionFrequency(kaleidoSettings.distortionFrequency)
@@ -421,6 +435,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 val micSnap = micAnalyzer.streamingSnapshot()
                 glView.setLiveSnapshot(micSnap)
                 if (micSnap.isBeat) partyEngine.onBeat()
+                applyPitchVisuals(micSnap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
                 delay(16L)
             }
         } else {
@@ -2692,5 +2707,39 @@ private fun UserSkinThumbnail(file: File, label: String, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(4.dp))
         Text(label, color = DimWhite, fontSize = 11.sp)
+    }
+}
+
+// ── Pitch visual consumers ────────────────────────────────────────────────────
+
+private class PitchHueState(var ema: Float = 0f)
+private class KeyTriggerState(var lastMs: Long = 0L, var prevRoot: Int? = null)
+
+private fun applyPitchVisuals(
+    snap:            com.onojk.abstrakt.audio.AudioSnapshot,
+    settings:        KaleidoSettings,
+    glView:          com.onojk.abstrakt.gl.AbstraktGLSurfaceView,
+    pitchHueState:   PitchHueState,
+    keyTriggerState: KeyTriggerState,
+    partyEngine:     PartyEngine,
+) {
+    if (settings.pitchToHue) {
+        val target = snap.chromaPeak * 30f
+        // Shortest-path EMA on 360° circle to avoid the 359°→1° wrap-around jump.
+        val diff = ((target - pitchHueState.ema) + 540f) % 360f - 180f
+        pitchHueState.ema = (pitchHueState.ema + diff * 0.12f + 360f) % 360f
+        glView.setColorizeHue(pitchHueState.ema)
+    }
+
+    if (settings.keyChangePartyTrigger) {
+        val changed = snap.keyChanged || (snap.keyRoot != null && snap.keyRoot != keyTriggerState.prevRoot)
+        if (changed && snap.keyConfidence >= 0.75f) {
+            val nowMs = System.currentTimeMillis()
+            if (nowMs - keyTriggerState.lastMs >= 2_000L) {
+                partyEngine.onBeat()
+                keyTriggerState.lastMs = nowMs
+            }
+        }
+        keyTriggerState.prevRoot = snap.keyRoot
     }
 }

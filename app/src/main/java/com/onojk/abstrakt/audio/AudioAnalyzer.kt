@@ -15,12 +15,20 @@ data class AudioSnapshot(
     val currentBpm:    Float? = null, // null until confidence threshold is reached
     val beatPhase:     Float  = 0f,   // PLL phase ∈ [0, 1); 0 = beat anchor, advances to next
     val bpmConfidence: Float  = 0f,   // autocorrelation peak / mean; threshold = 1.8
+    // Key detection — locks ~5-6 s after audio starts (4 s history + 3-hit debounce gate).
+    val chroma:       FloatArray = FloatArray(12), // L2-normalized 12-pitch-class profile
+    val chromaPeak:   Int        = 0,              // dominant pitch class 0–11 (C=0); hue = peak*30°
+    val keyRoot:      Int?       = null,           // null until confidence gate passes; 0=C…11=B
+    val keyIsMajor:   Boolean    = true,
+    val keyConfidence: Float     = 0f,             // Pearson r of best-matching K-S profile
+    val keyChanged:   Boolean    = false,          // true on the chunk when lockedKey transitions
 )
 
 fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
     val n = audioFile.rmsEnvelope.size
     if (n == 0) return AudioSnapshot(FloatArray(8), 0f, false)
-    val w = (playbackFraction * n).toInt().coerceIn(0, n - 1)
+    val w        = (playbackFraction * n).toInt().coerceIn(0, n - 1)
+    val keyRaw   = audioFile.keyRoot[w]
     return AudioSnapshot(
         bands         = audioFile.smoothedBands[w].copyOf(),
         peak          = audioFile.rmsEnvelope[w],
@@ -32,6 +40,12 @@ fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
         currentBpm    = audioFile.bpm,
         beatPhase     = audioFile.beatPhase[w],
         bpmConfidence = audioFile.bpmConfidence,
+        chroma        = audioFile.chroma[w].copyOf(),
+        chromaPeak    = audioFile.chromaPeak[w],
+        keyRoot       = if (keyRaw == -1) null else keyRaw,
+        keyIsMajor    = audioFile.keyIsMajor[w],
+        keyConfidence = audioFile.keyConfidence[w],
+        keyChanged    = audioFile.keyChanged[w],
     )
 }
 
@@ -67,6 +81,9 @@ class StreamingAnalyzer {
     // Tempo tracker — nominal chunk = 1/60 s (render-loop call rate).
     private val tempoTracker = TempoTracker(TempoTracker.STREAMING_CHUNK_SEC)
 
+    // Key tracker — same nominal chunk duration as tempo tracker.
+    private val keyTracker = KeyTracker(TempoTracker.STREAMING_CHUNK_SEC)
+
     // Wall-clock origin for nowSec passed to AdaptiveCooldown; reset in beginStreaming.
     private var nanoBase: Long = 0L
     // Previous snapshot time for dtSec envelope advance.
@@ -83,6 +100,7 @@ class StreamingAnalyzer {
         lastNanos     = 0L
         bandDetectors = createBandDetectors(sampleRate, STREAMING_HISTORY)
         tempoTracker.reset()
+        keyTracker.reset()
         active = true
     }
 
@@ -163,6 +181,11 @@ class StreamingAnalyzer {
 
         prevSpec = spectrum
 
+        // ── Key / pitch detection ─────────────────────────────────────────────
+        val rawChroma  = chromaFromMagnitudes(spectrum, sr)
+        val keyChanged = keyTracker.processChunk(rawChroma)
+        val lockedKey  = keyTracker.lockedKey
+
         val isBeat = maxOf(lvLow, lvMid, lvHigh, lvBroad) > 0f
 
         // ── 8 bands with AGC normalization + EMA ─────────────────────────────
@@ -195,6 +218,12 @@ class StreamingAnalyzer {
             currentBpm    = tempoTracker.currentBpm,
             beatPhase     = tempoTracker.phase,
             bpmConfidence = tempoTracker.confidence,
+            chroma        = keyTracker.chroma.copyOf(),
+            chromaPeak    = keyTracker.chromaPeak,
+            keyRoot       = lockedKey?.first,
+            keyIsMajor    = lockedKey?.second ?: true,
+            keyConfidence = keyTracker.confidence,
+            keyChanged    = keyChanged,
         )
     }
 
