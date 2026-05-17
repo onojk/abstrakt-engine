@@ -4,9 +4,13 @@ import org.jtransforms.fft.FloatFFT_1D
 import kotlin.math.*
 
 data class AudioSnapshot(
-    val bands: FloatArray,  // 8 values in [0,1]; logarithmic frequency bands (see BAND_EDGES_HZ)
+    val bands: FloatArray,        // 8 values in [0,1]; logarithmic frequency bands (see BAND_EDGES_HZ)
     val peak: Float,
-    val isBeat: Boolean,
+    val isBeat: Boolean,          // true when any per-band envelope is active (backward compat)
+    val beatLow: Float      = 0f, // BeatEnvelope level for Low band      (60-250 Hz)  ∈ [0,1]
+    val beatMid: Float      = 0f, // BeatEnvelope level for Mid band      (250-2k Hz)  ∈ [0,1]
+    val beatHigh: Float     = 0f, // BeatEnvelope level for High band     (2k-16k Hz)  ∈ [0,1]
+    val beatBroadband: Float = 0f,// BeatEnvelope level for Broadband                  ∈ [0,1]
 )
 
 fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
@@ -14,9 +18,13 @@ fun snapshotAt(audioFile: AudioFile, playbackFraction: Float): AudioSnapshot {
     if (n == 0) return AudioSnapshot(FloatArray(8), 0f, false)
     val w = (playbackFraction * n).toInt().coerceIn(0, n - 1)
     return AudioSnapshot(
-        bands  = audioFile.smoothedBands[w].copyOf(),
-        peak   = audioFile.rmsEnvelope[w],
-        isBeat = audioFile.beatFlags[w],
+        bands         = audioFile.smoothedBands[w].copyOf(),
+        peak          = audioFile.rmsEnvelope[w],
+        isBeat        = audioFile.beatFlags[w],
+        beatLow       = audioFile.beatLow[w],
+        beatMid       = audioFile.beatMid[w],
+        beatHigh      = audioFile.beatHigh[w],
+        beatBroadband = audioFile.beatBroadband[w],
     )
 }
 
@@ -39,14 +47,20 @@ class StreamingAnalyzer {
     @Volatile var channels: Int   = 1
     @Volatile var active: Boolean = false
 
-    private val fftEngine  = FloatFFT_1D(FFT_SIZE.toLong())
-    private val fftBuf     = FloatArray(FFT_SIZE)
-    private var prevSpec   = FloatArray(FFT_BINS)
-    private val bandEma    = FloatArray(8)
-    private val bandPeak   = FloatArray(8) { 100f }  // AGC: decays toward actual peaks
-    private val fluxHist   = ArrayDeque<Float>()
-    private var lastBeatAt = -120   // frame counter for cooldown
-    private var frameCtr   = 0
+    private val fftEngine = FloatFFT_1D(FFT_SIZE.toLong())
+    private val fftBuf    = FloatArray(FFT_SIZE)
+    private var prevSpec  = FloatArray(FFT_BINS)
+    private val bandEma   = FloatArray(8)
+    private val bandPeak  = FloatArray(8) { 100f }  // AGC: decays toward actual peaks
+
+    // Per-band onset detectors — historySize=360 ≈ 6 s at 60 fps × 16.7 ms/frame
+    private companion object { private const val STREAMING_HISTORY = 360 }
+    private var bandDetectors = createBandDetectors(44100, STREAMING_HISTORY)
+
+    // Wall-clock origin for nowSec passed to AdaptiveCooldown; reset in beginStreaming.
+    private var nanoBase: Long = 0L
+    // Previous snapshot time for dtSec envelope advance.
+    private var lastNanos: Long = 0L
 
     fun beginStreaming(sampleRate: Int, channels: Int) {
         this.sampleRate = sampleRate
@@ -55,9 +69,9 @@ class StreamingAnalyzer {
         prevSpec.fill(0f)
         bandEma.fill(0f)
         bandPeak.fill(100f)
-        fluxHist.clear()
-        lastBeatAt = -120
-        frameCtr   = 0
+        nanoBase      = 0L
+        lastNanos     = 0L
+        bandDetectors = createBandDetectors(sampleRate, STREAMING_HISTORY)
         active = true
     }
 
@@ -109,22 +123,26 @@ class StreamingAnalyzer {
         fftEngine.realForward(fftBuf)
         val spectrum = spectrumMagnitudes(fftBuf)
 
-        // ── Spectral flux ─────────────────────────────────────────────────────
-        var flux = 0f
-        for (k in 0 until FFT_BINS) {
-            val diff = spectrum[k] - prevSpec[k]
-            if (diff > 0f) flux += diff
-        }
+        // ── Wall-clock time tracking (relative origin avoids Float precision loss) ──
+        val nowNanos = System.nanoTime()
+        if (nanoBase == 0L) { nanoBase = nowNanos; lastNanos = nowNanos }
+        val nowSec = (nowNanos - nanoBase).toFloat() / 1_000_000_000f
+        val dtSec  = ((nowNanos - lastNanos).toFloat() / 1_000_000_000f).coerceIn(0.001f, 0.1f)
+        lastNanos  = nowNanos
+
+        // ── Per-band onset detection (reads prevSpec before update below) ─────
+        val lvLow    = bandDetectors[BeatBand.Low.ordinal]
+                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvMid    = bandDetectors[BeatBand.Mid.ordinal]
+                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvHigh   = bandDetectors[BeatBand.High.ordinal]
+                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
+        val lvBroad  = bandDetectors[BeatBand.Broadband.ordinal]
+                           .processFlux(spectrum, prevSpec, nowSec, dtSec)
+
         prevSpec = spectrum
 
-        fluxHist.addLast(flux)
-        if (fluxHist.size > 20) fluxHist.removeFirst()
-        val avgFlux = fluxHist.average().toFloat()
-
-        frameCtr++
-        // Cooldown ≥ 7 frames ≈ 120ms at 60fps
-        val isBeat = flux > avgFlux * 1.5f && flux > 0.5f && (frameCtr - lastBeatAt) >= 7
-        if (isBeat) lastBeatAt = frameCtr
+        val isBeat = maxOf(lvLow, lvMid, lvHigh, lvBroad) > 0f
 
         // ── 8 bands with AGC normalization + EMA ─────────────────────────────
         val rawBands = bandEnergies(spectrum, sr)
@@ -145,7 +163,15 @@ class StreamingAnalyzer {
         }
         val peak = sqrt(sumSq / peakN).toFloat().coerceIn(0f, 1f)
 
-        return AudioSnapshot(bands = resultBands, peak = peak, isBeat = isBeat)
+        return AudioSnapshot(
+            bands         = resultBands,
+            peak          = peak,
+            isBeat        = isBeat,
+            beatLow       = lvLow,
+            beatMid       = lvMid,
+            beatHigh      = lvHigh,
+            beatBroadband = lvBroad,
+        )
     }
 
     fun endStreaming() {

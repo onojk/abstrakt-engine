@@ -59,6 +59,10 @@ data class AudioFile(
     val rmsEnvelope: FloatArray,           // normalized RMS per ~50ms window [numWindows]
     val smoothedBands: Array<FloatArray>,  // EMA-smoothed 8-band values [numWindows][8], 0..1
     val beatFlags: BooleanArray,           // pre-computed beat per window [numWindows]
+    val beatLow: FloatArray,               // BeatEnvelope level for Low band (60-250 Hz)  [numWindows]
+    val beatMid: FloatArray,               // BeatEnvelope level for Mid band (250-2k Hz)  [numWindows]
+    val beatHigh: FloatArray,              // BeatEnvelope level for High band (2k-16k Hz) [numWindows]
+    val beatBroadband: FloatArray,         // BeatEnvelope level for Broadband             [numWindows]
 )
 
 suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(Dispatchers.IO) {
@@ -89,9 +93,18 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
     val windowSamples    = windowMonoFrames * channelCount   // interleaved PCM16 shorts
     val windowBytes      = windowSamples * 2
 
-    val rmsRaw     = mutableListOf<Float>()
+    val rmsRaw       = mutableListOf<Float>()
     val rawBandsList = mutableListOf<FloatArray>()
-    val fluxList   = mutableListOf<Float>()
+    val fluxList     = mutableListOf<Float>()
+
+    // Per-band onset detection — historySize=43 ≈ 6 s at one 50ms window per entry
+    val beatDets      = createBandDetectors(sampleRate, historySize = 43)
+    val beatLowList   = mutableListOf<Float>()
+    val beatMidList   = mutableListOf<Float>()
+    val beatHighList  = mutableListOf<Float>()
+    val beatBroadList = mutableListOf<Float>()
+    val windowDtSec   = windowMonoFrames.toFloat() / sampleRate
+    var windowTimeSec = 0f
 
     val windowBuf  = ByteArray(windowBytes)
     var windowPos  = 0
@@ -172,6 +185,26 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
                         }
                         fluxList.add(flux)
 
+                        // ── Per-band onset detection ───────────────────────────
+                        // processFlux reads prevSpec before it is updated below.
+                        beatLowList.add(
+                            beatDets[BeatBand.Low.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        beatMidList.add(
+                            beatDets[BeatBand.Mid.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        beatHighList.add(
+                            beatDets[BeatBand.High.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        beatBroadList.add(
+                            beatDets[BeatBand.Broadband.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        windowTimeSec += windowDtSec
+
                         rawBandsList.add(bandEnergies(spectrum, sampleRate))
                         prevSpec  = spectrum
                         windowPos = 0
@@ -236,5 +269,12 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
         }
     }
 
-    AudioFile(uri, durationMs, sampleRate, channelCount, rmsEnvelope, smoothedBands, beatFlags)
+    AudioFile(
+        uri, durationMs, sampleRate, channelCount,
+        rmsEnvelope, smoothedBands, beatFlags,
+        beatLow      = FloatArray(numWindows) { beatLowList[it] },
+        beatMid      = FloatArray(numWindows) { beatMidList[it] },
+        beatHigh     = FloatArray(numWindows) { beatHighList[it] },
+        beatBroadband = FloatArray(numWindows) { beatBroadList[it] },
+    )
 }

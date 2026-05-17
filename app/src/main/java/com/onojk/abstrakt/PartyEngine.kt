@@ -1,5 +1,6 @@
 package com.onojk.abstrakt
 
+import com.onojk.abstrakt.audio.BeatBand
 import com.onojk.abstrakt.gl.AbstraktGLSurfaceView
 import com.onojk.abstrakt.gl.AbstraktRenderer
 import java.util.Random
@@ -15,7 +16,7 @@ class PartyEngine(private val applyChange: (Random) -> Unit) {
 
     private val random = Random()
 
-    fun onBeat() {
+    fun onBeat(band: BeatBand = BeatBand.Broadband) {
         if (!enabled) return
         if (random.nextFloat() > intensity) return
         applyChange(random)
