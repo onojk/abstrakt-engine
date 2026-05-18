@@ -1628,6 +1628,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onKeyChangePartyTriggerChange = { kaleidoVm.setKeyChangePartyTrigger(it) },
                 onBpmRotationLockChange       = { kaleidoVm.setBpmRotationLock(it) },
                 onBeatsPerRevolutionChange    = { kaleidoVm.setBeatsPerRevolution(it) },
+                onBundleApply                 = { it.applyToView(glView) },
                 onToggleLock                  = { kaleidoVm.toggleLock(it) },
             )
         }
@@ -1884,6 +1885,7 @@ private fun KaleidoSettingsContent(
     onKeyChangePartyTriggerChange: (Boolean) -> Unit,
     onBpmRotationLockChange: (Boolean) -> Unit,
     onBeatsPerRevolutionChange: (Int) -> Unit,
+    onBundleApply: (StyleBundle) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -1899,6 +1901,21 @@ private fun KaleidoSettingsContent(
             style = MaterialTheme.typography.titleLarge,
             color = NeonCyan,
         )
+
+        // ── STYLE BUNDLES ─────────────────────────────────────────────────────
+        SettingsSectionHeader("Style bundles")
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding        = PaddingValues(horizontal = 4.dp),
+        ) {
+            items(StyleBundle.ALL) { bundle ->
+                FilterChip(
+                    selected    = false,
+                    onClick     = { onBundleApply(bundle) },
+                    label       = { Text(bundle.name) },
+                )
+            }
+        }
 
         // ── GEOMETRY ─────────────────────────────────────────────────────────
         SettingsSectionHeader("Geometry")
