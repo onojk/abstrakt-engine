@@ -19,6 +19,8 @@ data class ExportConfig(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,
+    val reactiveEnabled: Boolean = false,
+    val reactiveIntensity: Float = 0.5f,
     val contrast: Float = 1.0f,
     val contrastPasses: Int = 1,
     val saturation: Float = 1.0f,

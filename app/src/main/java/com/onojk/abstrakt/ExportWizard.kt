@@ -635,8 +635,11 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
         val partyLine = buildString {
             append("Party: ${if (settings.partyEnabled) "on" else "off"}")
             append(" | Random: ${if (settings.randomEnabled) "on" else "off"}")
+            append(" | Reactive: ${if (settings.reactiveEnabled) "on" else "off"}")
             if (settings.partyEnabled || settings.randomEnabled)
-                append(" | ${(settings.partyIntensity * 100).toInt()}%")
+                append(" | P/R: ${(settings.partyIntensity * 100).toInt()}%")
+            if (settings.reactiveEnabled)
+                append(" | React: ${(settings.reactiveIntensity * 100).toInt()}%")
         }
         SummaryRow("Auto", partyLine)
         SummaryRow("Beat reactivity", "${(settings.beatReactivity * 100).toInt()}%")
@@ -1037,6 +1040,60 @@ private fun ExportKaleidoOverrideContent(
                 )
                 Text(
                     text       = "${(settings.partyIntensity * 100).toInt()}%",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+        }
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(reactiveEnabled = !settings.reactiveEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Reactive mode",
+                    color      = Color.White,
+                    fontSize   = 14.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    modifier   = Modifier.weight(1f),
+                )
+                Text(
+                    "Cycles painter on strong musical peaks",
+                    color    = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                )
+            }
+            Switch(
+                checked         = settings.reactiveEnabled,
+                onCheckedChange = { onUpdate(settings.copy(reactiveEnabled = it)) },
+            )
+        }
+
+        if (settings.reactiveEnabled) {
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Intensity",
+                    color    = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(64.dp),
+                )
+                Slider(
+                    value         = settings.reactiveIntensity,
+                    onValueChange = { onUpdate(settings.copy(reactiveIntensity = it)) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${(settings.reactiveIntensity * 100).toInt()}%",
                     color      = Color.White,
                     fontSize   = 12.sp,
                     fontFamily = FontFamily.Monospace,

@@ -87,6 +87,14 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setPartyIntensity(value) }
     }
 
+    fun setReactiveEnabled(value: Boolean) {
+        viewModelScope.launch { store.setReactiveEnabled(value) }
+    }
+
+    fun setReactiveIntensity(value: Float) {
+        viewModelScope.launch { store.setReactiveIntensity(value) }
+    }
+
     fun setBassZoomIntensity(value: Float) {
         viewModelScope.launch { store.setBassZoomIntensity(value) }
     }

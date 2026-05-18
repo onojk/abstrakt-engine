@@ -56,6 +56,8 @@ class Mp4Exporter(
     private val partyEnabled: Boolean = false,
     private val randomEnabled: Boolean = false,
     private val partyIntensity: Float = 0.5f,
+    private val reactiveEnabled: Boolean = false,
+    private val reactiveIntensity: Float = 0.5f,
     private val bassZoomIntensity: Float = 0.5f,
     private val contrast: Float = 1.0f,
     private val contrastPasses: Int = 1,
@@ -215,6 +217,9 @@ class Mp4Exporter(
         val exportRandomEngine = RandomEngine { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
         exportRandomEngine.enabled   = randomEnabled
         exportRandomEngine.intensity = partyIntensity
+        val exportReactiveEngine = ReactiveEngine { renderer.cyclePainter() }
+        exportReactiveEngine.enabled   = reactiveEnabled
+        exportReactiveEngine.intensity = reactiveIntensity
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -287,6 +292,7 @@ class Mp4Exporter(
 
                 if (snap.isBeat) exportPartyEngine.onBeat()
                 exportRandomEngine.tickWithVideoTime(presentationTimeUs / 1000L)
+                exportReactiveEngine.onSnapshot(snap, nowMs = presentationTimeUs / 1000L)
 
                 EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeUs * 1000L)
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)

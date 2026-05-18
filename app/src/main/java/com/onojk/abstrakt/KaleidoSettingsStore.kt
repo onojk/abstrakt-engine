@@ -32,6 +32,8 @@ object KaleidoKeys {
     val PARTY_ENABLED          = booleanPreferencesKey("party_enabled")
     val RANDOM_ENABLED         = booleanPreferencesKey("random_enabled")
     val PARTY_INTENSITY        = floatPreferencesKey("party_intensity")
+    val REACTIVE_ENABLED       = booleanPreferencesKey("reactive_enabled")
+    val REACTIVE_INTENSITY     = floatPreferencesKey("reactive_intensity")
     val BASS_ZOOM_INTENSITY    = floatPreferencesKey("bass_zoom_intensity")
     val CONTRAST               = floatPreferencesKey("contrast")
     val CONTRAST_PASSES        = intPreferencesKey("contrast_passes")
@@ -75,6 +77,8 @@ class KaleidoSettingsStore(private val context: Context) {
             partyEnabled         = prefs[KaleidoKeys.PARTY_ENABLED] ?: false,
             randomEnabled        = prefs[KaleidoKeys.RANDOM_ENABLED] ?: false,
             partyIntensity       = (prefs[KaleidoKeys.PARTY_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
+            reactiveEnabled      = prefs[KaleidoKeys.REACTIVE_ENABLED]   ?: false,
+            reactiveIntensity    = (prefs[KaleidoKeys.REACTIVE_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
             bassZoomIntensity    = (prefs[KaleidoKeys.BASS_ZOOM_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
             contrast             = (prefs[KaleidoKeys.CONTRAST] ?: 1.0f).coerceIn(0f, 2f),
             contrastPasses       = (prefs[KaleidoKeys.CONTRAST_PASSES] ?: 1).coerceIn(1, 6),
@@ -177,6 +181,14 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setPartyIntensity(value: Float) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.PARTY_INTENSITY] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setReactiveEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.REACTIVE_ENABLED] = value }
+    }
+
+    suspend fun setReactiveIntensity(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.REACTIVE_INTENSITY] = value.coerceIn(0f, 1f) }
     }
 
     suspend fun setBassZoomIntensity(value: Float) {

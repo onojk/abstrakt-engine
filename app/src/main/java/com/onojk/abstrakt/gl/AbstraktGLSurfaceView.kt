@@ -81,6 +81,7 @@ class AbstraktGLSurfaceView(context: Context) : GLSurfaceView(context) {
     fun setChromaAberrationEnabled(value: Boolean)   { queueEvent { renderer.chromaAberrationEnabled = value } }
     fun setChromaAberrationIntensity(value: Float)   { queueEvent { renderer.chromaAberrationIntensity = value } }
     fun setChromaAberrationAudioReact(value: Boolean){ queueEvent { renderer.chromaAberrationAudioReact = value } }
+    fun cyclePainter()                               { queueEvent { renderer.cyclePainter() } }
     val currentShapeName: StateFlow<String>      get() = renderer.currentShapeName
     fun captureMosaicController(): CaptureMosaicController = renderer.captureController
     fun kaleidoFboWidth(): Int  = renderer.kaleidoTexW

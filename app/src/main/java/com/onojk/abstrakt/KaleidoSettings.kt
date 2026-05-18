@@ -48,6 +48,8 @@ data class KaleidoSettings(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,       // shared by both engines; 0..1
+    val reactiveEnabled: Boolean = false,
+    val reactiveIntensity: Float = 0.5f,
     val bassZoomIntensity: Float = 0.5f,    // 0=off, 1=max bass-driven zoom pulse
     val contrast: Float = 1.0f,            // 0..2, 1=passthrough
     val contrastPasses: Int = 1,           // 1..6, >1=posterization

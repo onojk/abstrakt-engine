@@ -286,6 +286,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     partyEnabled                 = kaleido.partyEnabled,
                     randomEnabled                = kaleido.randomEnabled,
                     partyIntensity               = kaleido.partyIntensity,
+                    reactiveEnabled              = kaleido.reactiveEnabled,
+                    reactiveIntensity            = kaleido.reactiveIntensity,
                     bassZoomIntensity            = kaleido.bassZoomIntensity,
                     contrast                     = kaleido.contrast,
                     contrastPasses               = kaleido.contrastPasses,

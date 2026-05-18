@@ -23,6 +23,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MusicNote
@@ -322,8 +323,9 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     }
 
     val lockedParamsFn: () -> Set<LockableParam> = { kaleidoVm.settings.value.lockedParams }
-    val partyEngine  = remember { PartyEngine  { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
-    val randomEngine = remember { RandomEngine { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
+    val partyEngine    = remember { PartyEngine    { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
+    val randomEngine   = remember { RandomEngine   { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
+    val reactiveEngine = remember { ReactiveEngine { glView.cyclePainter() } }
     val engineScope  = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { randomEngine.start(engineScope) }
@@ -344,6 +346,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
             isPlaying = false
             playbackFraction = 0f
         }
+        reactiveEngine.reset()
     }
 
     LaunchedEffect(isPlaying) {
@@ -355,6 +358,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 val snap = audioFile?.let { snapshotAt(it, playbackFraction) }
                 if (snap?.isBeat == true) partyEngine.onBeat()
                 if (snap != null) {
+                    reactiveEngine.onSnapshot(snap)
                     applyPitchVisuals(snap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
                     glView.setRotationSpeedTarget(bpmRotationTarget(snap, kaleidoSettings))
                 }
@@ -396,12 +400,14 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         glView.setChromaAberrationAudioReact(kaleidoSettings.chromaAberrationAudioReact)
     }
 
-    LaunchedEffect(kaleidoSettings.partyEnabled)   { partyEngine.enabled   = kaleidoSettings.partyEnabled }
-    LaunchedEffect(kaleidoSettings.randomEnabled)  { randomEngine.enabled  = kaleidoSettings.randomEnabled }
-    LaunchedEffect(kaleidoSettings.partyIntensity) {
+    LaunchedEffect(kaleidoSettings.partyEnabled)     { partyEngine.enabled    = kaleidoSettings.partyEnabled }
+    LaunchedEffect(kaleidoSettings.randomEnabled)    { randomEngine.enabled   = kaleidoSettings.randomEnabled }
+    LaunchedEffect(kaleidoSettings.partyIntensity)   {
         partyEngine.intensity  = kaleidoSettings.partyIntensity
         randomEngine.intensity = kaleidoSettings.partyIntensity
     }
+    LaunchedEffect(kaleidoSettings.reactiveEnabled)  { reactiveEngine.enabled   = kaleidoSettings.reactiveEnabled }
+    LaunchedEffect(kaleidoSettings.reactiveIntensity){ reactiveEngine.intensity = kaleidoSettings.reactiveIntensity }
 
     // When both engines turn off, restore all saved settings to renderer.
     // LaunchedEffect(kaleidoSettings) already does this atomically on any setting change,
@@ -445,6 +451,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 val micSnap = micAnalyzer.streamingSnapshot()
                 glView.setLiveSnapshot(micSnap)
                 if (micSnap.isBeat) partyEngine.onBeat()
+                reactiveEngine.onSnapshot(micSnap)
                 applyPitchVisuals(micSnap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
                 glView.setRotationSpeedTarget(bpmRotationTarget(micSnap, kaleidoSettings))
                 delay(16L)
@@ -1631,6 +1638,8 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onKeyChangePartyTriggerChange = { kaleidoVm.setKeyChangePartyTrigger(it) },
                 onBpmRotationLockChange       = { kaleidoVm.setBpmRotationLock(it) },
                 onBeatsPerRevolutionChange    = { kaleidoVm.setBeatsPerRevolution(it) },
+                onReactiveEnabledChange          = { kaleidoVm.setReactiveEnabled(it) },
+                onReactiveIntensityChange        = { kaleidoVm.setReactiveIntensity(it) },
                 onChromaAberrationEnabledChange  = { kaleidoVm.setChromaAberrationEnabled(it) },
                 onChromaAberrationIntensityChange = { kaleidoVm.setChromaAberrationIntensity(it) },
                 onChromaAberrationAudioReactChange = { kaleidoVm.setChromaAberrationAudioReact(it) },
@@ -1883,6 +1892,8 @@ private fun KaleidoSettingsContent(
     onPartyEnabledChange: (Boolean) -> Unit,
     onRandomEnabledChange: (Boolean) -> Unit,
     onPartyIntensityChange: (Float) -> Unit,
+    onReactiveEnabledChange: (Boolean) -> Unit,
+    onReactiveIntensityChange: (Float) -> Unit,
     onBassZoomIntensityChange: (Float) -> Unit,
     onContrastChange: (Float) -> Unit,
     onContrastPassesChange: (Int) -> Unit,
@@ -2660,6 +2671,78 @@ private fun KaleidoSettingsContent(
                 )
             }
             Switch(checked = settings.randomEnabled, onCheckedChange = { onRandomEnabledChange(it) })
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onReactiveEnabledChange(!settings.reactiveEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector        = Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        tint               = MaterialTheme.colorScheme.primary,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Reactive mode",
+                        style      = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color      = Color.White,
+                    )
+                }
+                Text(
+                    text  = "Cycles painter on strong musical peaks",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = settings.reactiveEnabled, onCheckedChange = { onReactiveEnabledChange(it) })
+        }
+
+        if (settings.reactiveEnabled) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text     = "Reactive",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(72.dp),
+                )
+                Slider(
+                    value         = settings.reactiveIntensity,
+                    onValueChange = { onReactiveIntensityChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.reactiveIntensity * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+            Text(
+                text     = when {
+                    settings.reactiveIntensity < 0.25f -> "Subtle peaks only"
+                    settings.reactiveIntensity < 0.55f -> "Musical"
+                    settings.reactiveIntensity < 0.85f -> "Frequent"
+                    else                               -> "Maximum"
+                },
+                style    = MaterialTheme.typography.bodySmall,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         if (settings.partyEnabled || settings.randomEnabled) {
