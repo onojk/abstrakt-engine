@@ -64,6 +64,9 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     private val _selectedRes = MutableStateFlow(ExportResolution.FHD_1080P)
     val selectedRes: StateFlow<ExportResolution> = _selectedRes.asStateFlow()
 
+    private val _selectedFps = MutableStateFlow(60)
+    val selectedFps: StateFlow<Int> = _selectedFps.asStateFlow()
+
     private val _isLoadingAudio = MutableStateFlow(false)
     val isLoadingAudio: StateFlow<Boolean> = _isLoadingAudio.asStateFlow()
 
@@ -175,6 +178,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     fun selectAudio(source: AudioSource)        { _selectedAudio.value = source }
     fun selectBeatResponse(on: Boolean)         { _beatResponse.value = on }
     fun selectResolution(res: ExportResolution) { _selectedRes.value = res }
+    fun selectFps(fps: Int)                     { _selectedFps.value = fps }
     internal fun navTo(step: WizardStep)        { _step.value = step }
     fun requestCancelDialog()                   { _showCancelDialog.value = true }
     fun dismissCancelDialog()                   { _showCancelDialog.value = false }
@@ -227,7 +231,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         val mode = _selectedMode.value
         val res  = _selectedRes.value
-        val fps  = if (res == ExportResolution.UHD_4K) 30 else 60
+        val fps  = if (res == ExportResolution.UHD_4K) 30 else _selectedFps.value
         val displayName = "abstrakt_${timestamp()}.mp4"
         val resolvedAudio = when (_selectedAudio.value) {
             AudioSource.UseCurrent -> _currentAudioFile.value
@@ -384,6 +388,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _pickedAudioFile.value      = null
         _beatResponse.value         = true
         _selectedRes.value          = ExportResolution.FHD_1080P
+        _selectedFps.value          = 60
         _isLoadingAudio.value       = false
         _progressValue.value        = 0f
         _progressPhase.value        = ""

@@ -93,6 +93,7 @@ fun ExportWizard(
     val pickedAudio     by vm.pickedAudioFile.collectAsStateWithLifecycle()
     val beatResponse    by vm.beatResponse.collectAsStateWithLifecycle()
     val selectedRes     by vm.selectedRes.collectAsStateWithLifecycle()
+    val selectedFps     by vm.selectedFps.collectAsStateWithLifecycle()
     val isLoadingAudio  by vm.isLoadingAudio.collectAsStateWithLifecycle()
     val progressValue   by vm.progressValue.collectAsStateWithLifecycle()
     val progressPhase   by vm.progressPhase.collectAsStateWithLifecycle()
@@ -214,10 +215,12 @@ fun ExportWizard(
         )
 
         WizardStep.RESOLUTION -> Step4Resolution(
-            selected   = selectedRes,
-            onSelect   = { vm.selectResolution(it) },
-            onBack     = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
-            onStart    = { vm.navTo(WizardStep.KALEIDO) },
+            selected      = selectedRes,
+            onSelect      = { vm.selectResolution(it) },
+            selectedFps   = selectedFps,
+            onSelectFps   = { vm.selectFps(it) },
+            onBack        = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
+            onStart       = { vm.navTo(WizardStep.KALEIDO) },
         )
 
         WizardStep.KALEIDO -> Step5Kaleido(
@@ -396,26 +399,48 @@ private fun Step3Beat(
 private fun Step4Resolution(
     selected: ExportResolution,
     onSelect: (ExportResolution) -> Unit,
+    selectedFps: Int,
+    onSelectFps: (Int) -> Unit,
     onBack: () -> Unit,
     onStart: () -> Unit,
 ) {
+    val is4K = selected == ExportResolution.UHD_4K
     WizardScaffold(
-        title        = "Resolution",
+        title        = "Resolution & frame rate",
         onBack       = onBack,
         primaryLabel = "Continue",
         onPrimary    = onStart,
     ) {
         Spacer(Modifier.height(8.dp))
         ExportResolution.entries.forEach { res ->
-            val is4K = res == ExportResolution.UHD_4K
             RadioRow(
-                selected = selected == res,
-                label    = res.label,
-                sublabel = if (is4K) "Significantly slower; large file (~100 MB/min)" else null,
-                sublabelColor = if (is4K) Color(0xFFFFAA00) else null,
-                onClick  = { onSelect(res) },
+                selected      = selected == res,
+                label         = res.label,
+                sublabel      = if (res == ExportResolution.UHD_4K) "Significantly slower; large file (~100 MB/min)" else null,
+                sublabelColor = if (res == ExportResolution.UHD_4K) Color(0xFFFFAA00) else null,
+                onClick       = { onSelect(res) },
             )
         }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+        Spacer(Modifier.height(8.dp))
+
+        RadioRow(
+            selected = if (is4K) true else selectedFps == 30,
+            label    = "30 fps",
+            sublabel = if (is4K) "4K exports are limited to 30 fps"
+                       else "Recommended for TikTok / Reels / Shorts — smaller file, no re-encoding",
+            sublabelColor = if (is4K) Color(0xFFFFAA00) else null,
+            onClick  = { if (!is4K) onSelectFps(30) },
+        )
+        RadioRow(
+            selected  = !is4K && selectedFps == 60,
+            enabled   = !is4K,
+            label     = "60 fps",
+            sublabel  = "Recommended for YouTube / archival — smoother motion",
+            onClick   = { onSelectFps(60) },
+        )
     }
 }
 
