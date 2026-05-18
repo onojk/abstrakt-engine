@@ -59,6 +59,8 @@ data class KaleidoSettings(
     val lockedParams: Set<LockableParam> = emptySet(),
     val pitchToHue: Boolean = false,         // drive colorizeHue from chromaPeak * 30° via EMA glide
     val keyChangePartyTrigger: Boolean = false, // fire partyEngine on key transitions (0.75 conf, 2 s cooldown)
+    val bpmRotationLock: Boolean = false,    // lock shape rotation speed to detected BPM
+    val beatsPerRevolution: Int = 8,         // 1/2/3/4/6/8/16 — how many beats per full revolution
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

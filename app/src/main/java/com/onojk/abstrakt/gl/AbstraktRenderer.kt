@@ -139,6 +139,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var lastTimeLogMs   = 0L
     @Volatile var dumpPainterStatsOnNextFrame = false
 
+    // BPM rotation lock: null = use shape's natural speed; non-null = EMA target in rad/s.
+    @Volatile var rotationSpeedTarget: Float? = null
+    private var smoothedRotSpeed    = 0f
+    private var rotSpeedInitialized = false
+
     private val _currentShapeName = MutableStateFlow("Cylinder")
     val currentShapeName: StateFlow<String> = _currentShapeName.asStateFlow()
 
@@ -653,8 +658,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
 
         // Advance rotation. Keep angles in [0, 2π) so mediump shaders never see
         // large values where float ULP exceeds one frame's increment.
-        val twoPi = (2.0 * Math.PI).toFloat()
-        shapeAngleRad      = (shapeAngleRad + dt * currentShape.rotationSpeedRadPerSec()).rem(twoPi)
+        val twoPi        = (2.0 * Math.PI).toFloat()
+        val naturalSpeed = currentShape.rotationSpeedRadPerSec()
+        if (!rotSpeedInitialized) { smoothedRotSpeed = naturalSpeed; rotSpeedInitialized = true }
+        val target       = rotationSpeedTarget ?: naturalSpeed
+        smoothedRotSpeed = smoothedRotSpeed * 0.95f + target * 0.05f
+        shapeAngleRad    = (shapeAngleRad + dt * smoothedRotSpeed).rem(twoPi)
         kaleidoRotationRad = (kaleidoRotationRad + dt * 0.05f).rem(twoPi)
 
         // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.

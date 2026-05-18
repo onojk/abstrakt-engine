@@ -45,6 +45,8 @@ object KaleidoKeys {
     val IMMERSIVE_TOOLTIP_SHOWN  = booleanPreferencesKey("immersive_tooltip_shown")
     val PITCH_TO_HUE             = booleanPreferencesKey("pitch_to_hue")
     val KEY_CHANGE_PARTY_TRIGGER = booleanPreferencesKey("key_change_party_trigger")
+    val BPM_ROTATION_LOCK        = booleanPreferencesKey("bpm_rotation_lock")
+    val BEATS_PER_REVOLUTION     = intPreferencesKey("beats_per_revolution")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -81,6 +83,9 @@ class KaleidoSettingsStore(private val context: Context) {
             beatReactivity           = (prefs[KaleidoKeys.BEAT_REACTIVITY] ?: 0.25f).coerceIn(0f, 1f),
             pitchToHue               = prefs[KaleidoKeys.PITCH_TO_HUE]             ?: false,
             keyChangePartyTrigger    = prefs[KaleidoKeys.KEY_CHANGE_PARTY_TRIGGER] ?: false,
+            bpmRotationLock          = prefs[KaleidoKeys.BPM_ROTATION_LOCK]        ?: false,
+            beatsPerRevolution       = (prefs[KaleidoKeys.BEATS_PER_REVOLUTION]    ?: 8)
+                .coerceIn(1, 16),
             lockedParams             = prefs[KaleidoKeys.LOCKED_PARAMS]
                 ?.split(",")
                 ?.filter { it.isNotBlank() }
@@ -210,6 +215,14 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setKeyChangePartyTrigger(value: Boolean) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.KEY_CHANGE_PARTY_TRIGGER] = value }
+    }
+
+    suspend fun setBpmRotationLock(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BPM_ROTATION_LOCK] = value }
+    }
+
+    suspend fun setBeatsPerRevolution(value: Int) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BEATS_PER_REVOLUTION] = value.coerceIn(1, 16) }
     }
 
     suspend fun setLockedParams(value: Set<LockableParam>) {
