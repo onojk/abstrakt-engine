@@ -1,5 +1,6 @@
 package com.onojk.abstrakt
 
+import java.util.Random
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -797,6 +798,26 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text("↓", color = NeonCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+
+            // ✦ Surprise me button — randomize all unlocked params in one tap
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .alpha(if (isRendererReady) 1f else 0.3f)
+                    .clickable(enabled = isRendererReady) {
+                        applyAllRandomChangesToView(glView, lockedParamsFn, Random())
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector        = Icons.Default.AutoAwesome,
+                    contentDescription = "Surprise me",
+                    tint               = NeonCyan,
+                    modifier           = Modifier.size(22.dp),
+                )
             }
 
             // "+" button — Add Skin

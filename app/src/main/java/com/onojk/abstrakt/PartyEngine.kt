@@ -44,7 +44,27 @@ fun applyRandomChangeToView(
 ) {
     val available = LockableParam.entries.filter { it !in lockedParamsFn() }
     if (available.isEmpty()) return
-    when (available[random.nextInt(available.size)]) {
+    applySingleParamToView(view, available[random.nextInt(available.size)], random)
+}
+
+/**
+ * Apply ALL unlocked parameters to the live GL view in one pass — the "Surprise me" action.
+ * BEAT_REACTIVITY is intentionally a no-op (never randomized), same as the single-param path.
+ */
+fun applyAllRandomChangesToView(
+    view: AbstraktGLSurfaceView,
+    lockedParamsFn: () -> Set<LockableParam>,
+    random: Random,
+) {
+    val locked = lockedParamsFn()
+    for (param in LockableParam.entries) {
+        if (param in locked) continue
+        applySingleParamToView(view, param, random)
+    }
+}
+
+private fun applySingleParamToView(view: AbstraktGLSurfaceView, param: LockableParam, random: Random) {
+    when (param) {
         LockableParam.SHAPE_KIND           -> view.setShapeKind(ShapeKind.entries.random())
         LockableParam.FOLD_COUNT           -> view.setFoldCount(random.nextInt(23) + 2)
         LockableParam.FRAME_SHAPE          -> view.setFrameShape(FrameShape.entries.random())
@@ -79,7 +99,11 @@ internal fun applyRandomChangeToRenderer(
 ) {
     val available = LockableParam.entries.filter { it !in lockedParams }
     if (available.isEmpty()) return
-    when (available[random.nextInt(available.size)]) {
+    applySingleParamToRenderer(renderer, available[random.nextInt(available.size)], random)
+}
+
+private fun applySingleParamToRenderer(renderer: AbstraktRenderer, param: LockableParam, random: Random) {
+    when (param) {
         LockableParam.SHAPE_KIND           -> renderer.setShapeKind(ShapeKind.entries.random())
         LockableParam.FOLD_COUNT           -> renderer.foldCount = random.nextInt(23) + 2
         LockableParam.FRAME_SHAPE          -> renderer.frameShape = FrameShape.entries.random()
