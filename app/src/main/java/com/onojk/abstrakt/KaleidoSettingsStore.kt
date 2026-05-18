@@ -45,8 +45,11 @@ object KaleidoKeys {
     val IMMERSIVE_TOOLTIP_SHOWN  = booleanPreferencesKey("immersive_tooltip_shown")
     val PITCH_TO_HUE             = booleanPreferencesKey("pitch_to_hue")
     val KEY_CHANGE_PARTY_TRIGGER = booleanPreferencesKey("key_change_party_trigger")
-    val BPM_ROTATION_LOCK        = booleanPreferencesKey("bpm_rotation_lock")
-    val BEATS_PER_REVOLUTION     = intPreferencesKey("beats_per_revolution")
+    val BPM_ROTATION_LOCK             = booleanPreferencesKey("bpm_rotation_lock")
+    val BEATS_PER_REVOLUTION          = intPreferencesKey("beats_per_revolution")
+    val CHROMA_ABERRATION_ENABLED     = booleanPreferencesKey("chroma_aberration_enabled")
+    val CHROMA_ABERRATION_INTENSITY   = floatPreferencesKey("chroma_aberration_intensity")
+    val CHROMA_ABERRATION_AUDIO_REACT = booleanPreferencesKey("chroma_aberration_audio_react")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -86,6 +89,9 @@ class KaleidoSettingsStore(private val context: Context) {
             bpmRotationLock          = prefs[KaleidoKeys.BPM_ROTATION_LOCK]        ?: false,
             beatsPerRevolution       = (prefs[KaleidoKeys.BEATS_PER_REVOLUTION]    ?: 8)
                 .coerceIn(1, 16),
+            chromaAberrationEnabled     = prefs[KaleidoKeys.CHROMA_ABERRATION_ENABLED]     ?: false,
+            chromaAberrationIntensity   = (prefs[KaleidoKeys.CHROMA_ABERRATION_INTENSITY]   ?: 0.008f).coerceIn(0f, 0.02f),
+            chromaAberrationAudioReact  = prefs[KaleidoKeys.CHROMA_ABERRATION_AUDIO_REACT]  ?: false,
             lockedParams             = prefs[KaleidoKeys.LOCKED_PARAMS]
                 ?.split(",")
                 ?.filter { it.isNotBlank() }
@@ -223,6 +229,18 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setBeatsPerRevolution(value: Int) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.BEATS_PER_REVOLUTION] = value.coerceIn(1, 16) }
+    }
+
+    suspend fun setChromaAberrationEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.CHROMA_ABERRATION_ENABLED] = value }
+    }
+
+    suspend fun setChromaAberrationIntensity(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.CHROMA_ABERRATION_INTENSITY] = value.coerceIn(0f, 0.02f) }
+    }
+
+    suspend fun setChromaAberrationAudioReact(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.CHROMA_ABERRATION_AUDIO_REACT] = value }
     }
 
     suspend fun setLockedParams(value: Set<LockableParam>) {

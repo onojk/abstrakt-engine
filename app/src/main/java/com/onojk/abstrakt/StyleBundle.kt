@@ -23,6 +23,9 @@ data class StyleBundle(
     val contrastPasses: Int,
     val saturation: Float,
     val beatReactivity: Float,
+    val chromaAberrationEnabled: Boolean,
+    val chromaAberrationIntensity: Float,
+    val chromaAberrationAudioReact: Boolean,
 ) {
     companion object {
         val DEFAULT = StyleBundle(
@@ -46,6 +49,9 @@ data class StyleBundle(
             contrastPasses     = 1,
             saturation         = 1.0f,
             beatReactivity     = 0.4f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val CALM = StyleBundle(
@@ -69,6 +75,9 @@ data class StyleBundle(
             contrastPasses     = 1,
             saturation         = 0.7f,
             beatReactivity     = 0.15f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val AGGRESSIVE = StyleBundle(
@@ -92,6 +101,9 @@ data class StyleBundle(
             contrastPasses     = 4,
             saturation         = 1.6f,
             beatReactivity     = 0.9f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val COSMIC = StyleBundle(
@@ -115,6 +127,9 @@ data class StyleBundle(
             contrastPasses     = 2,
             saturation         = 1.3f,
             beatReactivity     = 0.5f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val VINTAGE = StyleBundle(
@@ -138,6 +153,9 @@ data class StyleBundle(
             contrastPasses     = 1,
             saturation         = 0.55f,
             beatReactivity     = 0.2f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val MINIMAL = StyleBundle(
@@ -161,6 +179,9 @@ data class StyleBundle(
             contrastPasses     = 3,
             saturation         = 0.5f,
             beatReactivity     = 0.25f,
+            chromaAberrationEnabled  = false,
+            chromaAberrationIntensity = 0.008f,
+            chromaAberrationAudioReact = false,
         )
 
         val PSYCHEDELIC = StyleBundle(
@@ -184,6 +205,9 @@ data class StyleBundle(
             contrastPasses     = 6,
             saturation         = 1.8f,
             beatReactivity     = 0.85f,
+            chromaAberrationEnabled  = true,
+            chromaAberrationIntensity = 0.012f,
+            chromaAberrationAudioReact = true,
         )
 
         val ALL: List<StyleBundle> = listOf(
@@ -212,4 +236,7 @@ fun StyleBundle.applyToView(view: AbstraktGLSurfaceView) {
     view.setContrastPasses(contrastPasses)
     view.setSaturation(saturation)
     view.setBeatReactivity(beatReactivity)
+    view.setChromaAberrationEnabled(chromaAberrationEnabled)
+    view.setChromaAberrationIntensity(chromaAberrationIntensity)
+    view.setChromaAberrationAudioReact(chromaAberrationAudioReact)
 }

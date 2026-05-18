@@ -21,6 +21,7 @@ enum class LockableParam {
     DISTORTION_PLUS_PITCH,
     DISTORTION_PLUS_ROLL,
     BEAT_REACTIVITY,
+    CHROMA_ABERRATION_ENABLED,
 }
 
 enum class FrameShape {
@@ -61,6 +62,9 @@ data class KaleidoSettings(
     val keyChangePartyTrigger: Boolean = false, // fire partyEngine on key transitions (0.75 conf, 2 s cooldown)
     val bpmRotationLock: Boolean = false,    // lock shape rotation speed to detected BPM
     val beatsPerRevolution: Int = 8,         // 1/2/3/4/6/8/16 — how many beats per full revolution
+    val chromaAberrationEnabled: Boolean = false,
+    val chromaAberrationIntensity: Float = 0.008f,  // 0..0.02 UV offset per channel
+    val chromaAberrationAudioReact: Boolean = false, // scale offset by beatDecay * 0.5 on beats
 )
 
 fun KaleidoSettings.frameColorRgbaFloats(): FloatArray {

@@ -139,6 +139,18 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setBeatsPerRevolution(value) }
     }
 
+    fun setChromaAberrationEnabled(value: Boolean) {
+        viewModelScope.launch { store.setChromaAberrationEnabled(value) }
+    }
+
+    fun setChromaAberrationIntensity(value: Float) {
+        viewModelScope.launch { store.setChromaAberrationIntensity(value) }
+    }
+
+    fun setChromaAberrationAudioReact(value: Boolean) {
+        viewModelScope.launch { store.setChromaAberrationAudioReact(value) }
+    }
+
     fun toggleLock(param: LockableParam) {
         val current = settings.value.lockedParams
         val updated = if (param in current) current - param else current + param

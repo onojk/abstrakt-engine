@@ -100,6 +100,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var distortionPlusFboW = 0
     private var distortionPlusFboH = 0
     private var distortionPlusProgram: ShaderProgram? = null
+    private var chromaAberrationFbo  = 0
+    private var chromaAberrationTex  = 0
+    private var chromaAberrationFboW = 0
+    private var chromaAberrationFboH = 0
+    private var chromaAberrationProgram: ShaderProgram? = null
     private var shapeFbo         = 0
     private var shapeColorTex    = 0
     private var shapeDepthBuffer = 0
@@ -122,6 +127,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     @Volatile var distortionPlusYaw     = 0f       // -180..180 degrees
     @Volatile var distortionPlusPitch   = 0f       // -90..90 degrees
     @Volatile var distortionPlusRoll    = 0f       // -180..180 degrees
+    @Volatile var chromaAberrationEnabled  = false
+    @Volatile var chromaAberrationIntensity = 0.008f  // 0..0.02 UV offset per channel
+    @Volatile var chromaAberrationAudioReact = false
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -194,6 +202,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         shapeFbo = 0; shapeColorTex = 0; shapeDepthBuffer = 0; shapeFboW = 0; shapeFboH = 0
         distortionPlusFbo = 0; distortionPlusTex = 0; distortionPlusFboW = 0; distortionPlusFboH = 0
         distortionPlusProgram = null
+        chromaAberrationFbo = 0; chromaAberrationTex = 0; chromaAberrationFboW = 0; chromaAberrationFboH = 0
+        chromaAberrationProgram = null
         ribbonReadIsA    = true
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -226,6 +236,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         blitProgram            = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
         frameOverlayProgram    = ShaderProgram(Shaders.TEST_VERT, Shaders.FRAME_OVERLAY_FRAG)
         distortionPlusProgram  = ShaderProgram(Shaders.TEST_VERT, Shaders.DISTORTION_PLUS_FRAG)
+        chromaAberrationProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.CHROMA_ABERRATION_FRAG)
 
         // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
         val vaos = IntArray(1)
@@ -446,6 +457,36 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         if (distortionPlusTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(distortionPlusTex), 0); distortionPlusTex = 0 }
         if (distortionPlusFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(distortionPlusFbo), 0); distortionPlusFbo = 0 }
         distortionPlusFboW = 0; distortionPlusFboH = 0
+    }
+
+    private fun createChromaAberrationFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        chromaAberrationTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, chromaAberrationTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        chromaAberrationFbo = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, chromaAberrationFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, chromaAberrationTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        chromaAberrationFboW = w
+        chromaAberrationFboH = h
+        Log.d(TAG, "chromaAberrationFBO: ${w}x${h} fbo=$chromaAberrationFbo tex=$chromaAberrationTex")
+    }
+
+    private fun destroyChromaAberrationFBO() {
+        if (chromaAberrationTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(chromaAberrationTex), 0); chromaAberrationTex = 0 }
+        if (chromaAberrationFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(chromaAberrationFbo), 0); chromaAberrationFbo = 0 }
+        chromaAberrationFboW = 0; chromaAberrationFboH = 0
     }
 
     private fun createShapeFBO(w: Int, h: Int) {
@@ -931,13 +972,40 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             // Capture one tile per frame for Capture Mosaic (before frame overlay).
             captureController.captureTileIfActive(kaleidoFBO, kaleidoTexW, kaleidoTexH)
 
+            // ── Pass 3.5: Chromatic Aberration → chromaAberrationFbo (optional) ──
+            val finalKaleidoTex = if (chromaAberrationEnabled) {
+                val caProg = chromaAberrationProgram
+                if (caProg != null) {
+                    if (chromaAberrationFbo == 0 ||
+                        chromaAberrationFboW != surfaceWidth ||
+                        chromaAberrationFboH != surfaceHeight) {
+                        destroyChromaAberrationFBO()
+                        createChromaAberrationFBO(surfaceWidth, surfaceHeight)
+                    }
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, chromaAberrationFbo)
+                    GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                    GLES30.glDisable(GLES30.GL_BLEND)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+                    caProg.use()
+                    caProg.setInt("u_tex", 0)
+                    caProg.setFloat("u_offset", chromaAberrationIntensity)
+                    caProg.setFloat("u_beat", beatDecay)
+                    caProg.setFloat("u_audio_scale", if (chromaAberrationAudioReact) 0.5f else 0f)
+                    drawQuad()
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                    chromaAberrationTex
+                } else kaleidoTex
+            } else kaleidoTex
+
             // ── Pass 4: Frame overlay → screen / encoder surface ──────────────
             val foProg = frameOverlayProgram
             if (foProg != null) {
                 GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, finalKaleidoTex)
                 foProg.use()
                 foProg.setInt("u_kaleido_tex", 0)
                 foProg.setVec2("u_resolution", wW, wH)
@@ -995,7 +1063,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         ribbonProgram?.delete();          ribbonProgram          = null
         blitProgram?.delete();            blitProgram            = null
         frameOverlayProgram?.delete();    frameOverlayProgram    = null
-        distortionPlusProgram?.delete();  distortionPlusProgram  = null
+        distortionPlusProgram?.delete();   distortionPlusProgram   = null
+        chromaAberrationProgram?.delete(); chromaAberrationProgram = null
 
         if (vaoId            != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),            0); vaoId            = 0 }
         if (vboId            != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),            0); vboId            = 0 }
@@ -1023,6 +1092,7 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         destroyKaleidoFBO()
         destroyShapeFBO()
         destroyDistortionPlusFBO()
+        destroyChromaAberrationFBO()
         destroyRibbonFBOs()
         destroyFBO()
 

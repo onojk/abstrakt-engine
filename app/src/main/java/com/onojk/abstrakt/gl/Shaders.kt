@@ -662,6 +662,26 @@ internal object Shaders {
         }
     """.trimIndent()
 
+    // Pass 3.5 — chromatic aberration: R shifted right, B shifted left by u_offset.
+    // u_beat * u_audio_scale scales the offset on beats (0 when audio-react is off).
+    val CHROMA_ABERRATION_FRAG = """
+        #version 300 es
+        precision mediump float;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        uniform sampler2D u_tex;
+        uniform float u_offset;
+        uniform float u_beat;
+        uniform float u_audio_scale;
+        void main() {
+            float eff = u_offset + u_beat * u_audio_scale;
+            float r = texture(u_tex, v_uv + vec2(eff, 0.0)).r;
+            float g = texture(u_tex, v_uv).g;
+            float b = texture(u_tex, v_uv - vec2(eff, 0.0)).b;
+            fragColor = vec4(r, g, b, 1.0);
+        }
+    """.trimIndent()
+
     val BLIT_FRAG = """
         #version 300 es
         precision mediump float;

@@ -391,6 +391,9 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         glView.setDistortionPlusRoll(kaleidoSettings.distortionPlusRoll)
         // When BPM lock is toggled off, immediately revert to natural rotation speed.
         if (!kaleidoSettings.bpmRotationLock) glView.setRotationSpeedTarget(null)
+        glView.setChromaAberrationEnabled(kaleidoSettings.chromaAberrationEnabled)
+        glView.setChromaAberrationIntensity(kaleidoSettings.chromaAberrationIntensity)
+        glView.setChromaAberrationAudioReact(kaleidoSettings.chromaAberrationAudioReact)
     }
 
     LaunchedEffect(kaleidoSettings.partyEnabled)   { partyEngine.enabled   = kaleidoSettings.partyEnabled }
@@ -1628,6 +1631,9 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onKeyChangePartyTriggerChange = { kaleidoVm.setKeyChangePartyTrigger(it) },
                 onBpmRotationLockChange       = { kaleidoVm.setBpmRotationLock(it) },
                 onBeatsPerRevolutionChange    = { kaleidoVm.setBeatsPerRevolution(it) },
+                onChromaAberrationEnabledChange  = { kaleidoVm.setChromaAberrationEnabled(it) },
+                onChromaAberrationIntensityChange = { kaleidoVm.setChromaAberrationIntensity(it) },
+                onChromaAberrationAudioReactChange = { kaleidoVm.setChromaAberrationAudioReact(it) },
                 onBundleApply                 = { it.applyToView(glView) },
                 onToggleLock                  = { kaleidoVm.toggleLock(it) },
             )
@@ -1885,6 +1891,9 @@ private fun KaleidoSettingsContent(
     onKeyChangePartyTriggerChange: (Boolean) -> Unit,
     onBpmRotationLockChange: (Boolean) -> Unit,
     onBeatsPerRevolutionChange: (Int) -> Unit,
+    onChromaAberrationEnabledChange: (Boolean) -> Unit,
+    onChromaAberrationIntensityChange: (Float) -> Unit,
+    onChromaAberrationAudioReactChange: (Boolean) -> Unit,
     onBundleApply: (StyleBundle) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
@@ -2419,6 +2428,79 @@ private fun KaleidoSettingsContent(
                     modifier   = Modifier.width(48.dp),
                 )
                 LockIconButton(LockableParam.DISTORTION_PLUS_ROLL, settings.lockedParams, onToggleLock)
+            }
+        }
+
+        // Chromatic Aberration
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onChromaAberrationEnabledChange(!settings.chromaAberrationEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Chromatic Aberration", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "RGB channel split — VHS / prism fringe",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LockIconButton(LockableParam.CHROMA_ABERRATION_ENABLED, settings.lockedParams, onToggleLock)
+            Switch(
+                checked         = settings.chromaAberrationEnabled,
+                onCheckedChange = { onChromaAberrationEnabledChange(it) },
+            )
+        }
+
+        if (settings.chromaAberrationEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Intensity",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.chromaAberrationIntensity,
+                    onValueChange = { onChromaAberrationIntensityChange(it) },
+                    valueRange    = 0f..0.02f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.chromaAberrationIntensity * 1000).toInt()}‰",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier
+                    .fillMaxWidth()
+                    .clickable { onChromaAberrationAudioReactChange(!settings.chromaAberrationAudioReact) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Pulse on beats", style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                    Text(
+                        "Scale intensity by beat energy",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked         = settings.chromaAberrationAudioReact,
+                    onCheckedChange = { onChromaAberrationAudioReactChange(it) },
+                )
             }
         }
 

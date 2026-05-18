@@ -85,6 +85,12 @@ private fun applySingleParamToView(view: AbstraktGLSurfaceView, param: LockableP
         LockableParam.DISTORTION_PLUS_PITCH -> view.setDistortionPlusPitch(-45f + random.nextFloat() * 90f)
         LockableParam.DISTORTION_PLUS_ROLL -> view.setDistortionPlusRoll(-180f + random.nextFloat() * 360f)
         LockableParam.BEAT_REACTIVITY      -> { /* Master sensitivity: locked-by-user-only, not randomized. */ }
+        LockableParam.CHROMA_ABERRATION_ENABLED -> {
+            val enable = random.nextDouble() < 0.3
+            view.setChromaAberrationEnabled(enable)
+            if (enable) view.setChromaAberrationIntensity(0.004f + random.nextFloat() * 0.011f)
+            view.setChromaAberrationAudioReact(enable)
+        }
     }
 }
 
@@ -124,5 +130,11 @@ private fun applySingleParamToRenderer(renderer: AbstraktRenderer, param: Lockab
         LockableParam.DISTORTION_PLUS_PITCH -> renderer.distortionPlusPitch = -45f + random.nextFloat() * 90f
         LockableParam.DISTORTION_PLUS_ROLL -> renderer.distortionPlusRoll = -180f + random.nextFloat() * 360f
         LockableParam.BEAT_REACTIVITY      -> { /* never randomized */ }
+        LockableParam.CHROMA_ABERRATION_ENABLED -> {
+            val enable = random.nextDouble() < 0.3
+            renderer.chromaAberrationEnabled = enable
+            if (enable) renderer.chromaAberrationIntensity = 0.004f + random.nextFloat() * 0.011f
+            renderer.chromaAberrationAudioReact = enable
+        }
     }
 }
