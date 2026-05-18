@@ -230,5 +230,8 @@ class StreamingAnalyzer {
     fun endStreaming() {
         active = false
         synchronized(this) { fill = 0 }
+        bandDetectors.forEach { it.reset() }
+        tempoTracker.reset()
+        keyTracker.reset()
     }
 }

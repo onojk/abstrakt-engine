@@ -106,6 +106,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.onojk.abstrakt.audio.AudioFile
+import com.onojk.abstrakt.audio.AudioSnapshot
 import com.onojk.abstrakt.audio.StreamingAnalyzer
 import com.onojk.abstrakt.audio.loadAndAnalyze
 import com.onojk.abstrakt.audio.snapshotAt
@@ -345,6 +346,7 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     }
 
     LaunchedEffect(isPlaying) {
+        glView.setLiveSnapshot(null)  // resuming: clear any prior silence override
         while (isPlaying) {
             val dur = audioFile?.durationMs ?: 0L
             if (dur > 0) {
@@ -353,10 +355,12 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 if (snap?.isBeat == true) partyEngine.onBeat()
                 if (snap != null) {
                     applyPitchVisuals(snap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
+                    glView.setRotationSpeedTarget(bpmRotationTarget(snap, kaleidoSettings))
                 }
             }
             delay(16L)
         }
+        glView.setLiveSnapshot(AudioSnapshot(FloatArray(8), 0f, false))
     }
 
     // Push all kaleido settings to the GL renderer whenever any field changes.
@@ -384,6 +388,8 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         glView.setDistortionPlusYaw(kaleidoSettings.distortionPlusYaw)
         glView.setDistortionPlusPitch(kaleidoSettings.distortionPlusPitch)
         glView.setDistortionPlusRoll(kaleidoSettings.distortionPlusRoll)
+        // When BPM lock is toggled off, immediately revert to natural rotation speed.
+        if (!kaleidoSettings.bpmRotationLock) glView.setRotationSpeedTarget(null)
     }
 
     LaunchedEffect(kaleidoSettings.partyEnabled)   { partyEngine.enabled   = kaleidoSettings.partyEnabled }
@@ -436,11 +442,17 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 glView.setLiveSnapshot(micSnap)
                 if (micSnap.isBeat) partyEngine.onBeat()
                 applyPitchVisuals(micSnap, kaleidoSettings, glView, pitchHueState, keyTriggerState, partyEngine)
+                glView.setRotationSpeedTarget(bpmRotationTarget(micSnap, kaleidoSettings))
                 delay(16L)
             }
         } else {
             livePulse.snapTo(0.4f)
-            glView.setLiveSnapshot(null)
+            if (!isPlaying) {
+                glView.setLiveSnapshot(AudioSnapshot(FloatArray(8), 0f, false))
+            } else {
+                glView.setLiveSnapshot(null)
+            }
+            glView.setRotationSpeedTarget(null)  // mic stopped: revert to natural speed
         }
     }
 
@@ -1593,6 +1605,8 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onSaturationChange            = { kaleidoVm.setSaturation(it) },
                 onPitchToHueChange            = { kaleidoVm.setPitchToHue(it) },
                 onKeyChangePartyTriggerChange = { kaleidoVm.setKeyChangePartyTrigger(it) },
+                onBpmRotationLockChange       = { kaleidoVm.setBpmRotationLock(it) },
+                onBeatsPerRevolutionChange    = { kaleidoVm.setBeatsPerRevolution(it) },
                 onToggleLock                  = { kaleidoVm.toggleLock(it) },
             )
         }
@@ -1847,6 +1861,8 @@ private fun KaleidoSettingsContent(
     onSaturationChange: (Float) -> Unit,
     onPitchToHueChange: (Boolean) -> Unit,
     onKeyChangePartyTriggerChange: (Boolean) -> Unit,
+    onBpmRotationLockChange: (Boolean) -> Unit,
+    onBeatsPerRevolutionChange: (Int) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
@@ -2616,6 +2632,58 @@ private fun KaleidoSettingsContent(
             )
         }
 
+        // BPM rotation lock
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onBpmRotationLockChange(!settings.bpmRotationLock) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Lock rotation to BPM",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
+                )
+                Text(
+                    "Spins to the detected tempo (requires audio)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.bpmRotationLock,
+                onCheckedChange = { onBpmRotationLockChange(it) },
+            )
+        }
+
+        if (settings.bpmRotationLock) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Beats per revolution",
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = Color.White,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding        = PaddingValues(horizontal = 4.dp),
+            ) {
+                items(listOf(1, 2, 3, 4, 6, 8, 16)) { bpr ->
+                    FilterChip(
+                        selected  = settings.beatsPerRevolution == bpr,
+                        onClick   = { onBeatsPerRevolutionChange(bpr) },
+                        label     = { Text(bpr.toString()) },
+                        leadingIcon = if (settings.beatsPerRevolution == bpr) {
+                            { Icon(Icons.Default.Check, contentDescription = null) }
+                        } else null,
+                    )
+                }
+            }
+        }
+
         // ── SUPPORT THE DEVELOPER ────────────────────────────────────────────
         Spacer(Modifier.height(16.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
@@ -2797,4 +2865,13 @@ private fun applyPitchVisuals(
         }
         keyTriggerState.prevRoot = snap.keyRoot
     }
+}
+
+// Returns the BPM-derived rotation speed in rad/s, or null when the lock is off
+// or BPM has not yet locked in (first ~6-7 s of audio). Null causes the renderer
+// to fall back to the shape's natural rotation speed.
+private fun bpmRotationTarget(snap: AudioSnapshot, settings: KaleidoSettings): Float? {
+    if (!settings.bpmRotationLock) return null
+    val bpm = snap.currentBpm ?: return null
+    return (2.0 * Math.PI / settings.beatsPerRevolution * (bpm / 60.0)).toFloat()
 }
