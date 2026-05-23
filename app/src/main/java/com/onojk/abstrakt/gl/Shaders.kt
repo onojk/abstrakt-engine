@@ -235,7 +235,21 @@ internal object Shaders {
         uniform float u_contrast;              // 0..2, 1=passthrough
         uniform int   u_contrast_passes;       // 1..6, >1=posterization
         uniform float u_saturation;            // 0..2, 1=passthrough
+        uniform int   u_palette_mode;     // 0=Off, 1=Warm, 2=Cool, 3=Earth, 4=Neon, 5=Mono, 6=Harmony
+        uniform float u_palette_tint;     // 0..1
+        uniform float u_palette_mono_hue; // 0..360
+        uniform int   u_harmony_num_offsets;     // 1..8
+        uniform float u_harmony_offsets[8];      // absolute hues in degrees
+        uniform float u_harmony_saturation;      // 0..1 target S
+        uniform float u_harmony_value;           // 0..1 target V
+        uniform float u_harmony_strength;        // 0..1 snap strength
         uniform float u_time;
+        uniform sampler3D u_lut;
+        uniform float     u_lut_strength;
+        uniform int       u_lut_enabled;
+        uniform float u_warp_progress;   // 0..1 envelope; <0 or >1 = inactive
+        uniform float u_warp_amplitude;  // peak strength
+        uniform float u_warp_seed;       // randomizes direction/phase per fire
         in  vec2 v_uv;
         out vec4 fragColor;
 
@@ -253,6 +267,50 @@ internal object Shaders {
             return rgb + vec3(v - c);
         }
 
+        vec3 rgb2hsv(vec3 c) {
+            float maxc = max(c.r, max(c.g, c.b));
+            float minc = min(c.r, min(c.g, c.b));
+            float v = maxc;
+            float d = maxc - minc;
+            float s = maxc == 0.0 ? 0.0 : d / maxc;
+            float h;
+            if (d == 0.0) {
+                h = 0.0;
+            } else if (maxc == c.r) {
+                h = mod((c.g - c.b) / d, 6.0);
+            } else if (maxc == c.g) {
+                h = (c.b - c.r) / d + 2.0;
+            } else {
+                h = (c.r - c.g) / d + 4.0;
+            }
+            h *= 60.0;
+            if (h < 0.0) h += 360.0;
+            return vec3(h, s, v);
+        }
+
+        float hueToward(float h, float target, float amount) {
+            float diff = mod(target - h + 540.0, 360.0) - 180.0;
+            return mod(h + diff * amount + 360.0, 360.0);
+        }
+
+        float hueDelta(float a, float b) {
+            float d = mod(b - a, 360.0);
+            if (d > 180.0) d -= 360.0;
+            if (d < -180.0) d += 360.0;
+            return abs(d);
+        }
+
+        float nearestHarmonyHue(float h) {
+            float nearest = u_harmony_offsets[0];
+            float minDist = hueDelta(h, u_harmony_offsets[0]);
+            for (int i = 1; i < 8; ++i) {
+                if (i >= u_harmony_num_offsets) break;
+                float d = hueDelta(h, u_harmony_offsets[i]);
+                if (d < minDist) { minDist = d; nearest = u_harmony_offsets[i]; }
+            }
+            return nearest;
+        }
+
         void main() {
             vec2 uv = v_uv;
             if (u_distortion_enabled == 1) {
@@ -261,6 +319,19 @@ internal object Shaders {
                 float waveV = sin(uv.x * freq * 6.28318 + u_time * freq * 1.2);
                 uv.x += waveU * u_distortion_amplitude * 0.05;
                 uv.y += waveV * u_distortion_amplitude * 0.05;
+            }
+            if (u_warp_progress >= 0.0 && u_warp_progress <= 1.0) {
+                float p      = u_warp_progress;
+                float attack = smoothstep(0.0, 0.15, p);
+                float decay  = 1.0 - smoothstep(0.15, 1.0, p);
+                float env    = attack * decay;
+                float dir    = u_warp_seed * 6.28318;
+                vec2  axis   = vec2(cos(dir), sin(dir));
+                float phase  = dot(uv, axis) * 3.0 + u_warp_seed * 10.0;
+                float sweep  = sin(phase - p * 9.0);
+                float amp    = u_warp_amplitude * env;
+                uv += vec2(-axis.y, axis.x) * sweep * amp;
+                uv += axis * sin(phase * 0.5 - p * 6.0) * amp * 0.5;
             }
             vec4 c = texture(u_painterTexture, uv);
             for (int i = 0; i < 6; ++i) {
@@ -271,6 +342,40 @@ internal object Shaders {
             c.rgb = clamp(mix(vec3(luma), c.rgb, u_saturation), 0.0, 1.0);
             if (u_invert_colors == 1)    c.rgb  = vec3(1.0) - c.rgb;
             if (u_colorize_enabled == 1) c.rgb *= hsv2rgb(u_colorize_hue, 1.0, 1.0);
+            if (u_palette_mode != 0) {
+                vec3 hsv = rgb2hsv(c.rgb);
+                vec3 outRgb = c.rgb;
+                if (u_palette_mode == 1) {
+                    hsv.x = hueToward(hsv.x, 30.0, u_palette_tint);
+                    hsv.y = clamp(hsv.y * (1.0 + 0.15 * u_palette_tint), 0.0, 1.0);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                } else if (u_palette_mode == 2) {
+                    hsv.x = hueToward(hsv.x, 210.0, u_palette_tint);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                } else if (u_palette_mode == 3) {
+                    hsv.x = hueToward(hsv.x, 35.0, u_palette_tint * 0.6);
+                    hsv.y = mix(hsv.y, hsv.y * 0.5 + 0.05, u_palette_tint);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                } else if (u_palette_mode == 4) {
+                    hsv.y = mix(hsv.y, 1.0, u_palette_tint);
+                    hsv.z = mix(hsv.z, min(hsv.z * 1.3 + 0.1, 1.0), u_palette_tint);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                } else if (u_palette_mode == 5) {
+                    hsv.x = u_palette_mono_hue;
+                    hsv.y = mix(hsv.y, 0.85, u_palette_tint);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                } else if (u_palette_mode == 6) {
+                    hsv.x = nearestHarmonyHue(hsv.x);
+                    hsv.y = mix(hsv.y, u_harmony_saturation, u_harmony_strength);
+                    hsv.z = mix(hsv.z, u_harmony_value,      u_harmony_strength);
+                    outRgb = hsv2rgb(hsv.x, hsv.y, hsv.z);
+                }
+                c.rgb = mix(c.rgb, outRgb, u_palette_tint);
+            }
+            if (u_lut_enabled == 1) {
+                vec3 graded = texture(u_lut, clamp(c.rgb, 0.0, 1.0)).rgb;
+                c.rgb = mix(c.rgb, graded, u_lut_strength);
+            }
             fragColor = c;
         }
     """.trimIndent()
@@ -545,6 +650,7 @@ internal object Shaders {
     // u_cyclone_angle so the image window scrolls in sync with cylinder rotation.
     // Opaque (alpha 1.0) — overwrites FBO like HueStripe/AudioPaint.
     // For a 4096-wide source image and 1024-wide FBO: 4 full revolutions per image cycle.
+    // Optional 3D LUT grading via u_lut (sampler3D) when u_lut_enabled == 1.
     val PAINTER_IMAGE_FRAG = """
         #version 300 es
         precision mediump float;
@@ -664,6 +770,38 @@ internal object Shaders {
 
     // Pass 3.5 — chromatic aberration: R shifted right, B shifted left by u_offset.
     // u_beat * u_audio_scale scales the offset on beats (0 when audio-react is off).
+    // Pass 3.6 — blackhole video-feedback tunnel (port of deck's blackhole.wgsl).
+    // u_prev: previous frame's feedback output; u_scene: current composited scene.
+    // Each frame expands the lookup into prev (div by shrink_rate < 1) so content
+    // appears to shrink toward center, producing infinite-mirror / tunnel recursion.
+    val BLACKHOLE_FRAG = """
+        #version 300 es
+        precision mediump float;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+        uniform sampler2D u_prev;
+        uniform sampler2D u_scene;
+        uniform float u_center_x;
+        uniform float u_center_y;
+        uniform float u_shrink_rate;
+        uniform float u_strength;
+        uniform float u_alpha_radius;
+        void main() {
+            vec2  center = vec2(u_center_x, u_center_y);
+            vec2  dir    = v_uv - center;
+            const float max_r = 0.7071;
+            float r = length(v_uv - vec2(0.5));
+            float spatial_alpha = 1.0 - smoothstep(u_alpha_radius * max_r, max_r, r);
+            vec2  prev_uv   = center + dir / u_shrink_rate;
+            float in_bounds = step(0.0, prev_uv.x) * step(prev_uv.x, 1.0)
+                            * step(0.0, prev_uv.y) * step(prev_uv.y, 1.0);
+            vec4 prev = texture(u_prev,  clamp(prev_uv, 0.0, 1.0));
+            vec4 live = texture(u_scene, v_uv);
+            float alpha = u_strength * spatial_alpha * in_bounds;
+            fragColor = vec4(mix(live.rgb, prev.rgb, alpha), 1.0);
+        }
+    """.trimIndent()
+
     val CHROMA_ABERRATION_FRAG = """
         #version 300 es
         precision mediump float;
@@ -825,6 +963,7 @@ internal object Shaders {
 
     // Skin painter: directly samples the skin texture 1:1 (4096×256 skin → 4096×256 FBO).
     // GL_REPEAT on S is set on the skin texture at load time so edges tile cleanly.
+    // Optional 3D LUT grading via u_lut (sampler3D) when u_lut_enabled == 1.
     val PAINTER_SKIN_FRAG = """
         #version 300 es
         precision mediump float;
@@ -887,6 +1026,149 @@ internal object Shaders {
             vec2 src = vec2(lonOut / TAU + 0.5, latOut / PI + 0.5);
 
             fragColor = texture(u_content, src);
+        }
+    """.trimIndent()
+
+    // ── Triple Echo Bloom composite ──────────────────────────────────────────
+    // Three tap textures (A=100%, B=75% knocked to black, C=50%).
+    // Keys white+black from each tap, then composites C under B (knockout) under A.
+    val ECHO_BLOOM_COMPOSITE_FRAG = """
+        #version 300 es
+        precision mediump float;
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        uniform sampler2D u_tapA;
+        uniform sampler2D u_tapB;
+        uniform sampler2D u_tapC;
+
+        const float KEY_DIST = 0.288;
+        const float KEY_SOFT = 0.015;
+
+        // Returns 0 for pixels near keyColor, 1 for pixels far from it.
+        float keyAlpha(vec3 rgb, vec3 keyColor) {
+            return smoothstep(KEY_DIST - KEY_SOFT, KEY_DIST + KEY_SOFT,
+                              distance(rgb, keyColor));
+        }
+
+        void main() {
+            vec3 rgbA = texture(u_tapA, v_uv).rgb;
+            vec3 rgbB = texture(u_tapB, v_uv).rgb;
+            vec3 rgbC = texture(u_tapC, v_uv).rgb;
+
+            float aA = keyAlpha(rgbA, vec3(1.0)) * keyAlpha(rgbA, vec3(0.0));
+            float aB = keyAlpha(rgbB, vec3(1.0)) * keyAlpha(rgbB, vec3(0.0));
+            float aC = keyAlpha(rgbC, vec3(1.0)) * keyAlpha(rgbC, vec3(0.0));
+
+            // Tap B knocked to black (rgb=0) — acts as a spacer/knockout.
+            // Non-premultiplied src-over, back-to-front: C, then B (black), then A.
+            //   result = C*aC*(1-aB)*(1-aA) + A*aA
+            vec3 rgb = rgbC * aC * (1.0 - aB) * (1.0 - aA)
+                     + rgbA * aA;
+
+            fragColor = vec4(rgb, 1.0);
+        }
+    """.trimIndent()
+
+    // Kite-tail wedge pass. Each body segment is a filled triangle (wide at head,
+    // pointed at tail). Rendered at 1/3-res FBO; GL_NEAREST upscale gives chunky look.
+    // No scene input — caller additively composites via LIGHTNING_COMPOSITE_FRAG.
+    val LIGHTNING_BOLT_FRAG = """
+        #version 300 es
+        precision highp float;
+
+        uniform vec3  u_color;    // electric-blue glow tint
+        uniform float u_aspect;   // surfaceWidth / surfaceHeight (< 1 for portrait)
+
+        const int   MAX_SEGS  = 256;
+        const float MAX_HW    = 0.050;  // max wedge half-width in iso-space at w=1
+        const float GLOW_DIST = 0.018;  // iso-space halo beyond triangle edge
+
+        uniform vec2  u_seg_a[MAX_SEGS];   // head-side (base, wide end)
+        uniform vec2  u_seg_b[MAX_SEGS];   // tail-side (tip, narrow end)
+        uniform float u_seg_w[MAX_SEGS];   // weight 0..1 (head=1, tail→0)
+        uniform int   u_seg_count;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        // IQ triangle SDF — negative inside, positive outside.
+        float sdTri(vec2 p, vec2 a, vec2 b, vec2 c) {
+            vec2 e0 = b-a, e1 = c-b, e2 = a-c;
+            vec2 v0 = p-a, v1 = p-b, v2 = p-c;
+            vec2 q0 = v0 - e0*clamp(dot(v0,e0)/dot(e0,e0), 0.0, 1.0);
+            vec2 q1 = v1 - e1*clamp(dot(v1,e1)/dot(e1,e1), 0.0, 1.0);
+            vec2 q2 = v2 - e2*clamp(dot(v2,e2)/dot(e2,e2), 0.0, 1.0);
+            float s = sign(e0.x*e2.y - e0.y*e2.x);
+            vec2  d = min(min(vec2(dot(q0,q0), s*(v0.x*e0.y-v0.y*e0.x)),
+                              vec2(dot(q1,q1), s*(v1.x*e1.y-v1.y*e1.x))),
+                              vec2(dot(q2,q2), s*(v2.x*e2.y-v2.y*e2.x)));
+            return -sqrt(d.x)*sign(d.y);
+        }
+
+        void main() {
+            // Iso-corrected space: equal pixel density in x and y.
+            vec2 p = vec2(v_uv.x, v_uv.y * u_aspect);
+
+            int   cnt  = min(u_seg_count, MAX_SEGS);
+            float minD = 1e9;
+            float minW = 0.0;
+
+            for (int i = 0; i < cnt; i++) {
+                float w = u_seg_w[i];
+                if (w < 0.005) continue;
+
+                vec2 base = vec2(u_seg_a[i].x, u_seg_a[i].y * u_aspect);
+                vec2 tip  = vec2(u_seg_b[i].x, u_seg_b[i].y * u_aspect);
+
+                vec2 dir = base - tip;
+                float lenSq = dot(dir, dir);
+                if (lenSq < 1e-10) continue;
+                dir /= sqrt(lenSq);
+                vec2 perp = vec2(-dir.y, dir.x);
+                float hw  = MAX_HW * w;
+
+                // Wedge triangle: tip at tail end, wide base at head end.
+                vec2 v0 = tip;
+                vec2 v1 = base + perp * hw;
+                vec2 v2 = base - perp * hw;
+
+                float d = sdTri(p, v0, v1, v2);
+                if (d < minD) { minD = d; minW = w; }
+            }
+
+            float glowR = GLOW_DIST * clamp(minW, 0.15, 1.0);
+            if (minD > glowR || minW < 0.005) { fragColor = vec4(0.0); return; }
+
+            // inside: 0 at edge, 1 deep inside (relative to wedge half-width)
+            // outside: 1 at surface, 0 at glow radius
+            float inside  = clamp(-minD / max(MAX_HW * minW, 0.001), 0.0, 1.0);
+            float outside = clamp(1.0 - minD / glowR,               0.0, 1.0);
+
+            // Brightness is full for any pixel inside or near a wedge.
+            // Wedge SIZE already encodes the taper — no need to dim by minW too.
+            vec3 glowColor = u_color * outside;
+            vec3 coreColor = mix(u_color, vec3(1.0), 0.92) * inside;
+            fragColor = vec4(glowColor + coreColor, 1.0);
+        }
+    """.trimIndent()
+
+    // Upscales the low-res bolt texture (GL_NEAREST on sampler gives chunky pixels)
+    // and additively blends it over the full-res scene.
+    val LIGHTNING_COMPOSITE_FRAG = """
+        #version 300 es
+        precision mediump float;
+
+        uniform sampler2D u_scene;
+        uniform sampler2D u_bolt;
+
+        in  vec2 v_uv;
+        out vec4 fragColor;
+
+        void main() {
+            vec3 scene = texture(u_scene, v_uv).rgb;
+            vec3 bolt  = texture(u_bolt,  v_uv).rgb;
+            fragColor  = vec4(scene + bolt, 1.0);
         }
     """.trimIndent()
 }

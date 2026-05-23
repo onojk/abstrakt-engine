@@ -58,13 +58,54 @@ class BeatEnvelope(
 
 // ── AdaptiveCooldown ──────────────────────────────────────────────────────────
 
-/** Prevents re-triggering within [minGapSec] seconds of the last fire. */
-class AdaptiveCooldown(val minGapSec: Float = 0.200f) {
-    private var lastFireSec: Float = -Float.MAX_VALUE
+/**
+ * Refractory period adapts to the detected tempo using the MEDIAN of up to
+ * [HISTORY_CAP] recent inter-beat intervals, mirroring the deck's
+ * AdaptiveCooldown in audio.rs exactly (constants, median index, interval
+ * guard). Time is supplied by the caller in seconds so tests and the offline
+ * path remain deterministic.
+ */
+class AdaptiveCooldown {
+    private var lastFireSec: Float? = null
+    private val historySec = ArrayDeque<Float>()
 
-    fun canFire(nowSec: Float): Boolean = nowSec - lastFireSec >= minGapSec
-    fun recordFire(nowSec: Float) { lastFireSec = nowSec }
-    fun reset() { lastFireSec = -Float.MAX_VALUE }
+    companion object {
+        const val FLOOR_SEC         = 0.080f
+        const val CEIL_SEC          = 0.220f
+        const val FRACTION          = 0.40f
+        const val HISTORY_CAP       = 8
+        const val EMPTY_DEFAULT_SEC = 0.120f
+        const val MAX_INTERVAL_SEC  = 2.0f
+    }
+
+    fun canFire(nowSec: Float): Boolean {
+        val last = lastFireSec ?: return true
+        return nowSec - last >= currentCooldownSec()
+    }
+
+    fun recordFire(nowSec: Float) {
+        val last = lastFireSec
+        if (last != null) {
+            val interval = nowSec - last
+            if (interval >= FLOOR_SEC && interval <= MAX_INTERVAL_SEC) {
+                if (historySec.size >= HISTORY_CAP) historySec.removeFirst()
+                historySec.addLast(interval)
+            }
+        }
+        lastFireSec = nowSec
+    }
+
+    private fun currentCooldownSec(): Float {
+        if (historySec.isEmpty()) return EMPTY_DEFAULT_SEC
+        val sorted = historySec.toFloatArray().also { it.sort() }
+        val median = sorted[sorted.size / 2]
+        return (median * FRACTION).coerceIn(FLOOR_SEC, CEIL_SEC)
+    }
+
+    fun reset() {
+        historySec.clear()
+        lastFireSec = null
+    }
 }
 
 // ── BandBeatDetector ──────────────────────────────────────────────────────────
@@ -145,7 +186,8 @@ class BandBeatDetector(
 
     companion object {
         private const val THRESHOLD_MULT = 1.5f
-        const val MIN_FLUX               = 0.5f
+        // Raise if silent-room noise-floor flux still fires spurious beats. See AudioAnalyzer.MIN_BAND_PEAK.
+        const val MIN_FLUX               = 1.0f  // was 0.5; doubled for phone noise floor
     }
 }
 

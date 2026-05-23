@@ -71,11 +71,22 @@ class StreamingAnalyzer {
     private val fftEngine = FloatFFT_1D(FFT_SIZE.toLong())
     private val fftBuf    = FloatArray(FFT_SIZE)
     private var prevSpec  = FloatArray(FFT_BINS)
+    private var noiseFilter = NoiseFilter(44100, false)
     private val bandEma   = FloatArray(8)
     private val bandPeak  = FloatArray(8) { 100f }  // AGC: decays toward actual peaks
+    // SHAKEDIAG — per-15-frame snapshot field logging
+    private var diagFrameCount = 0
 
-    // Per-band onset detectors — historySize=360 ≈ 6 s at 60 fps × 16.7 ms/frame
-    private companion object { private const val STREAMING_HISTORY = 360 }
+    // ── Mic noise-floor calibration tunables ──────────────────────────────────
+    // Raise MIN_BAND_PEAK if micro-shake persists in silence; lower if quiet music goes dead.
+    // Raise NoiseFilter.GATE_{OPEN,CLOSE}_THRESH if gate doesn't close in silence.
+    // Raise BandBeatDetector.MIN_FLUX if silent-room flux still fires spurious beats.
+    // Raise CHROMA_GATE_LEVEL if hue still flickers in silence; lower if hue stops tracking key.
+    private companion object {
+        private const val STREAMING_HISTORY = 360  // ≈ 6 s at 60 fps × 16.7 ms/frame
+        private const val MIN_BAND_PEAK     = 5f   // AGC floor: noise/MIN_BAND_PEAK ≈ 0 in silence
+        private const val CHROMA_GATE_LEVEL = 0.040f // hold chromaPeak below this rms; mirrors GATE_OPEN_THRESH
+    }
     private var bandDetectors = createBandDetectors(44100, STREAMING_HISTORY)
 
     // Tempo tracker — nominal chunk = 1/60 s (render-loop call rate).
@@ -89,7 +100,7 @@ class StreamingAnalyzer {
     // Previous snapshot time for dtSec envelope advance.
     private var lastNanos: Long = 0L
 
-    fun beginStreaming(sampleRate: Int, channels: Int) {
+    fun beginStreaming(sampleRate: Int, channels: Int, micInput: Boolean = true) {
         this.sampleRate = sampleRate
         this.channels   = channels
         synchronized(this) { ring.fill(0); cursor = 0; fill = 0 }
@@ -101,7 +112,15 @@ class StreamingAnalyzer {
         bandDetectors = createBandDetectors(sampleRate, STREAMING_HISTORY)
         tempoTracker.reset()
         keyTracker.reset()
+        noiseFilter = NoiseFilter(sampleRate, micInput)
+        diagFrameCount = 0
         active = true
+        android.util.Log.d("SHAKEDIAG", "beginStreaming micInput=$micInput sr=$sampleRate " +
+            "MIN_BAND_PEAK=$MIN_BAND_PEAK " +
+            "GATE_OPEN=${NoiseFilter.GATE_OPEN_THRESH} " +
+            "GATE_CLOSE=${NoiseFilter.GATE_CLOSE_THRESH} " +
+            "MIN_FLUX=${BandBeatDetector.MIN_FLUX} " +
+            "CHROMA_GATE=$CHROMA_GATE_LEVEL")
     }
 
     fun pushSamples(pcm: ShortArray, length: Int) {
@@ -131,22 +150,31 @@ class StreamingAnalyzer {
         }
 
         // ── Extract most-recent FFT_SIZE mono frames from the ring ────────────
-        fftBuf.fill(0f)
         val neededInterleaved  = FFT_SIZE * ch
         val availInterleaved   = minOf(fillSnap, neededInterleaved)
         val monoFrames         = availInterleaved / ch
         val fftOffset          = FFT_SIZE - monoFrames  // zero-pad at the start
 
+        // Step 1: downmix to mono floats
+        val mono = FloatArray(monoFrames)
         for (j in 0 until monoFrames) {
             var s = 0.0
             for (c in 0 until ch) {
                 val ringIdx = ((curSnap - availInterleaved + j * ch + c) + ringSize * 2) % ringSize
                 s += ringSnap[ringIdx].toDouble()
             }
-            val sample = (s / ch / 32768.0).toFloat().coerceIn(-1f, 1f)
-            val pos    = fftOffset + j
-            val hann   = (0.5 * (1.0 - cos(2.0 * PI * pos / (FFT_SIZE - 1)))).toFloat()
-            fftBuf[pos] = sample * hann
+            mono[j] = (s / ch / 32768.0).toFloat().coerceIn(-1f, 1f)
+        }
+
+        // Step 2: HPF + gate (mic path only; no-op when filter is disabled)
+        val noiseRms = noiseFilter.processSamples(mono)
+
+        // Step 3: Hann window + zero-pad into FFT buffer
+        fftBuf.fill(0f)
+        for (j in 0 until monoFrames) {
+            val pos  = fftOffset + j
+            val hann = (0.5 * (1.0 - cos(2.0 * PI * pos / (FFT_SIZE - 1)))).toFloat()
+            fftBuf[pos] = mono[j] * hann
         }
 
         fftEngine.realForward(fftBuf)
@@ -182,16 +210,23 @@ class StreamingAnalyzer {
         prevSpec = spectrum
 
         // ── Key / pitch detection ─────────────────────────────────────────────
+        // Gate chroma on signal level: in silence the L2-normalised chroma is pure noise,
+        // making chromaPeak (→ hue) flicker even when bands/gate are quiet. Hold last value.
         val rawChroma  = chromaFromMagnitudes(spectrum, sr)
-        val keyChanged = keyTracker.processChunk(rawChroma)
+        val keyChanged = if (!noiseFilter.enabled || noiseRms >= CHROMA_GATE_LEVEL) {
+            keyTracker.processChunk(rawChroma)
+        } else {
+            false
+        }
         val lockedKey  = keyTracker.lockedKey
 
         val isBeat = maxOf(lvLow, lvMid, lvHigh, lvBroad) > 0f
 
         // ── 8 bands with AGC normalization + EMA ─────────────────────────────
         val rawBands = bandEnergies(spectrum, sr)
+        noiseFilter.processBands(rawBands)
         val resultBands = FloatArray(8) { b ->
-            bandPeak[b] = maxOf(bandPeak[b] * 0.999f, rawBands[b])
+            bandPeak[b] = maxOf(bandPeak[b] * 0.999f, rawBands[b]).coerceAtLeast(MIN_BAND_PEAK)
             val norm = (rawBands[b] / bandPeak[b]).coerceIn(0f, 1f)
             bandEma[b] = 0.7f * bandEma[b] + 0.3f * norm
             bandEma[b]
@@ -206,6 +241,21 @@ class StreamingAnalyzer {
             sumSq += v * v
         }
         val peak = sqrt(sumSq / peakN).toFloat().coerceIn(0f, 1f)
+
+        // SHAKEDIAG — per-15-frame field log to identify which path is fluctuating in silence
+        diagFrameCount++
+        if (diagFrameCount % 15 == 0) {
+            val chromaSkipped = noiseFilter.enabled && noiseRms < CHROMA_GATE_LEVEL
+            val maxBand = resultBands.max()
+            android.util.Log.d("SHAKEDIAG",
+                "mic#$diagFrameCount peak=${"%.4f".format(peak)} " +
+                "maxBand=${"%.4f".format(maxBand)} " +
+                "chromaPeak=${keyTracker.chromaPeak} chromaSkipped=$chromaSkipped " +
+                "noiseRms=${"%.4f".format(noiseRms)} " +
+                "isBeat=$isBeat beatLow=${"%.3f".format(lvLow)} " +
+                "bpm=${tempoTracker.currentBpm?.let { "${"%.1f".format(it)}" } ?: "null"} " +
+                "phase=${"%.3f".format(tempoTracker.phase)}")
+        }
 
         return AudioSnapshot(
             bands         = resultBands,
@@ -233,5 +283,6 @@ class StreamingAnalyzer {
         bandDetectors.forEach { it.reset() }
         tempoTracker.reset()
         keyTracker.reset()
+        noiseFilter.enabled = false
     }
 }

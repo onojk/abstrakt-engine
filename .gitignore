@@ -22,3 +22,8 @@ app/google-services.json
 # Project source dumps for AI handoff
 all_code.txt
 project_code.txt
+
+# Signing config - never commit
+keystore.properties
+*.jks
+*.keystore

@@ -57,29 +57,31 @@ class BeatDetectionTest {
 
     @Test
     fun `AdaptiveCooldown allows fire before any record`() {
-        val cd = AdaptiveCooldown(minGapSec = 0.2f)
+        val cd = AdaptiveCooldown()
         assertTrue(cd.canFire(0f))
     }
 
     @Test
-    fun `AdaptiveCooldown blocks re-fire within gap`() {
-        val cd = AdaptiveCooldown(minGapSec = 0.2f)
+    fun `AdaptiveCooldown blocks re-fire within default gap`() {
+        // Empty history -> default cooldown = 120 ms
+        val cd = AdaptiveCooldown()
         cd.recordFire(0f)
-        assertFalse(cd.canFire(0.1f))  // 100ms < 200ms gap
-        assertFalse(cd.canFire(0.19f)) // just under the gap
+        assertFalse(cd.canFire(0.1f))   // 100ms < 120ms default
+        assertFalse(cd.canFire(0.119f)) // just under the 120ms default
     }
 
     @Test
-    fun `AdaptiveCooldown allows re-fire at and after gap`() {
-        val cd = AdaptiveCooldown(minGapSec = 0.2f)
+    fun `AdaptiveCooldown allows re-fire at and after default gap`() {
+        // Empty history -> default cooldown = 120 ms
+        val cd = AdaptiveCooldown()
         cd.recordFire(0f)
-        assertTrue(cd.canFire(0.2f))   // exactly at gap
+        assertTrue(cd.canFire(0.12f))  // exactly at 120ms default
         assertTrue(cd.canFire(0.5f))   // well past gap
     }
 
     @Test
     fun `AdaptiveCooldown reset re-enables immediate fire`() {
-        val cd = AdaptiveCooldown(minGapSec = 0.2f)
+        val cd = AdaptiveCooldown()
         cd.recordFire(0f)
         cd.reset()
         assertTrue(cd.canFire(0.01f))

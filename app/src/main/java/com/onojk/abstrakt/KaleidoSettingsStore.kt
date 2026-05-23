@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.onojk.abstrakt.color.ColorHarmony
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -52,6 +53,24 @@ object KaleidoKeys {
     val CHROMA_ABERRATION_ENABLED     = booleanPreferencesKey("chroma_aberration_enabled")
     val CHROMA_ABERRATION_INTENSITY   = floatPreferencesKey("chroma_aberration_intensity")
     val CHROMA_ABERRATION_AUDIO_REACT = booleanPreferencesKey("chroma_aberration_audio_react")
+    val PALETTE_MODE      = stringPreferencesKey("palette_mode")
+    val PALETTE_TINT      = floatPreferencesKey("palette_tint")
+    val PALETTE_MONO_HUE  = floatPreferencesKey("palette_mono_hue")
+    val BLACKHOLE_ENABLED      = booleanPreferencesKey("blackhole_enabled")
+    val BLACKHOLE_STRENGTH     = floatPreferencesKey("blackhole_strength")
+    val BLACKHOLE_SHRINK_RATE  = floatPreferencesKey("blackhole_shrink_rate")
+    val BLACKHOLE_ALPHA_RADIUS = floatPreferencesKey("blackhole_alpha_radius")
+    val BLACKHOLE_WANDER_AMOUNT = floatPreferencesKey("blackhole_wander_amount")
+    val HARMONY_TYPE           = stringPreferencesKey("harmony_type")
+    val HARMONY_ANCHOR_HUE     = floatPreferencesKey("harmony_anchor_hue")
+    val HARMONY_SATURATION     = floatPreferencesKey("harmony_saturation")
+    val HARMONY_VALUE          = floatPreferencesKey("harmony_value")
+    val HARMONY_STRENGTH       = floatPreferencesKey("harmony_strength")
+    val LUT_SELECTION          = stringPreferencesKey("lut_selection")
+    val LUT_STRENGTH           = floatPreferencesKey("lut_strength")
+    val SUDDEN_WARP_ENABLED    = booleanPreferencesKey("sudden_warp_enabled")
+    val LIGHTNING_ENABLED           = booleanPreferencesKey("lightning_enabled")
+    val LIGHTNING_SPRITES_LIMIT_5S  = booleanPreferencesKey("lightning_sprites_limit_5s")
 }
 
 class KaleidoSettingsStore(private val context: Context) {
@@ -96,6 +115,28 @@ class KaleidoSettingsStore(private val context: Context) {
             chromaAberrationEnabled     = prefs[KaleidoKeys.CHROMA_ABERRATION_ENABLED]     ?: false,
             chromaAberrationIntensity   = (prefs[KaleidoKeys.CHROMA_ABERRATION_INTENSITY]   ?: 0.008f).coerceIn(0f, 0.02f),
             chromaAberrationAudioReact  = prefs[KaleidoKeys.CHROMA_ABERRATION_AUDIO_REACT]  ?: false,
+            paletteMode          = prefs[KaleidoKeys.PALETTE_MODE]
+                ?.let { runCatching { PaletteMode.valueOf(it) }.getOrNull() }
+                ?: PaletteMode.Off,
+            paletteTint          = (prefs[KaleidoKeys.PALETTE_TINT] ?: 1.0f).coerceIn(0f, 1f),
+            paletteMonoHue       = (prefs[KaleidoKeys.PALETTE_MONO_HUE] ?: 200f).coerceIn(0f, 360f),
+            blackholeEnabled      = prefs[KaleidoKeys.BLACKHOLE_ENABLED]      ?: false,
+            blackholeStrength     = (prefs[KaleidoKeys.BLACKHOLE_STRENGTH]     ?: 0.5f).coerceIn(0f, 0.98f),
+            blackholeShrinkRate   = (prefs[KaleidoKeys.BLACKHOLE_SHRINK_RATE]  ?: 0.97f).coerceIn(0.90f, 0.999f),
+            blackholeAlphaRadius  = (prefs[KaleidoKeys.BLACKHOLE_ALPHA_RADIUS] ?: 0.5f).coerceIn(0.1f, 0.9f),
+            blackholeWanderAmount = (prefs[KaleidoKeys.BLACKHOLE_WANDER_AMOUNT] ?: 0.005f).coerceIn(0f, 0.02f),
+            harmonyType          = prefs[KaleidoKeys.HARMONY_TYPE]
+                ?.let { runCatching { ColorHarmony.valueOf(it) }.getOrNull() }
+                ?: ColorHarmony.Triadic,
+            harmonyAnchorHue     = (prefs[KaleidoKeys.HARMONY_ANCHOR_HUE]  ?: 0f).coerceIn(0f, 360f),
+            harmonySaturation    = (prefs[KaleidoKeys.HARMONY_SATURATION]  ?: 0.8f).coerceIn(0f, 1f),
+            harmonyValue         = (prefs[KaleidoKeys.HARMONY_VALUE]       ?: 0.8f).coerceIn(0f, 1f),
+            harmonyStrength      = (prefs[KaleidoKeys.HARMONY_STRENGTH]    ?: 0.6f).coerceIn(0f, 1f),
+            lutSelection         = prefs[KaleidoKeys.LUT_SELECTION] ?: "none",
+            lutStrength          = (prefs[KaleidoKeys.LUT_STRENGTH] ?: 1.0f).coerceIn(0f, 1f),
+            suddenWarpEnabled    = prefs[KaleidoKeys.SUDDEN_WARP_ENABLED] ?: false,
+            lightningEnabled          = prefs[KaleidoKeys.LIGHTNING_ENABLED]          ?: false,
+            lightningSpritesLimit5s   = prefs[KaleidoKeys.LIGHTNING_SPRITES_LIMIT_5S]  ?: true,
             lockedParams             = prefs[KaleidoKeys.LOCKED_PARAMS]
                 ?.split(",")
                 ?.filter { it.isNotBlank() }
@@ -253,6 +294,78 @@ class KaleidoSettingsStore(private val context: Context) {
 
     suspend fun setChromaAberrationAudioReact(value: Boolean) {
         context.kaleidoDataStore.edit { it[KaleidoKeys.CHROMA_ABERRATION_AUDIO_REACT] = value }
+    }
+
+    suspend fun setPaletteMode(value: PaletteMode) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PALETTE_MODE] = value.name }
+    }
+
+    suspend fun setPaletteTint(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PALETTE_TINT] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setPaletteMonoHue(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.PALETTE_MONO_HUE] = value.coerceIn(0f, 360f) }
+    }
+
+    suspend fun setBlackholeEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BLACKHOLE_ENABLED] = value }
+    }
+
+    suspend fun setBlackholeStrength(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BLACKHOLE_STRENGTH] = value.coerceIn(0f, 0.98f) }
+    }
+
+    suspend fun setBlackholeShrinkRate(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BLACKHOLE_SHRINK_RATE] = value.coerceIn(0.90f, 0.999f) }
+    }
+
+    suspend fun setBlackholeAlphaRadius(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BLACKHOLE_ALPHA_RADIUS] = value.coerceIn(0.1f, 0.9f) }
+    }
+
+    suspend fun setBlackholeWanderAmount(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.BLACKHOLE_WANDER_AMOUNT] = value.coerceIn(0f, 0.02f) }
+    }
+
+    suspend fun setHarmonyType(value: ColorHarmony) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.HARMONY_TYPE] = value.name }
+    }
+
+    suspend fun setHarmonyAnchorHue(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.HARMONY_ANCHOR_HUE] = value.coerceIn(0f, 360f) }
+    }
+
+    suspend fun setHarmonySaturation(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.HARMONY_SATURATION] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setHarmonyValue(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.HARMONY_VALUE] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setHarmonyStrength(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.HARMONY_STRENGTH] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setLutSelection(value: String) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.LUT_SELECTION] = value }
+    }
+
+    suspend fun setLutStrength(value: Float) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.LUT_STRENGTH] = value.coerceIn(0f, 1f) }
+    }
+
+    suspend fun setSuddenWarpEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.SUDDEN_WARP_ENABLED] = value }
+    }
+
+    suspend fun setLightningEnabled(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.LIGHTNING_ENABLED] = value }
+    }
+
+    suspend fun setLightningSpritesLimit5s(value: Boolean) {
+        context.kaleidoDataStore.edit { it[KaleidoKeys.LIGHTNING_SPRITES_LIMIT_5S] = value }
     }
 
     suspend fun setLockedParams(value: Set<LockableParam>) {

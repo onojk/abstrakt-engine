@@ -112,9 +112,14 @@ import com.onojk.abstrakt.audio.AudioSnapshot
 import com.onojk.abstrakt.audio.StreamingAnalyzer
 import com.onojk.abstrakt.audio.loadAndAnalyze
 import com.onojk.abstrakt.audio.snapshotAt
+import com.onojk.abstrakt.color.ColorHarmony
 import com.onojk.abstrakt.gl.AbstraktGLSurfaceView
 import com.onojk.abstrakt.gl.GlVizMode
 import com.onojk.abstrakt.gl.Painter
+import com.onojk.abstrakt.skin.BuiltinLuts
+import com.onojk.abstrakt.skin.CubeLut
+import com.onojk.abstrakt.skin.parseCubeLut
+import com.onojk.abstrakt.skin.CubeLutParseResult
 import com.onojk.abstrakt.ui.theme.MyFistAppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -254,6 +259,10 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     // keyChangePartyTrigger: cooldown + previous key state for both render loops.
     val keyTriggerState = remember { KeyTriggerState() }
 
+    // SHAKEDIAG debug toggle — forces renderer to see a frozen silent snapshot every frame.
+    // Tap "DIAG SILENT" button (DEBUG builds only) to confirm whether shake is audio-driven.
+    var debugForceSilent by remember { mutableStateOf(false) }
+
     // Long-press sheet state.
     var showSlotSheet    by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -323,7 +332,10 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     }
 
     val lockedParamsFn: () -> Set<LockableParam> = { kaleidoVm.settings.value.lockedParams }
-    val partyEngine    = remember { PartyEngine    { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
+    val partyEngine    = remember { PartyEngine(
+        applyChange = { r -> applyRandomChangeToView(glView, lockedParamsFn, r) },
+        onWarp      = { glView.triggerSuddenWarp() },
+    ) }
     val randomEngine   = remember { RandomEngine   { r -> applyRandomChangeToView(glView, lockedParamsFn, r) } }
     val reactiveEngine = remember { ReactiveEngine { glView.cyclePainter() } }
     val engineScope  = rememberCoroutineScope()
@@ -398,6 +410,70 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         glView.setChromaAberrationEnabled(kaleidoSettings.chromaAberrationEnabled)
         glView.setChromaAberrationIntensity(kaleidoSettings.chromaAberrationIntensity)
         glView.setChromaAberrationAudioReact(kaleidoSettings.chromaAberrationAudioReact)
+        glView.setSuddenWarpEnabled(kaleidoSettings.suddenWarpEnabled)
+        glView.setLightningEnabled(kaleidoSettings.lightningEnabled)
+        glView.setLightningSpritesLimit5s(kaleidoSettings.lightningSpritesLimit5s)
+        if (!kaleidoSettings.lightningEnabled) glView.setLightningTouch(0f, 0f, false)
+        glView.setBlackholeEnabled(kaleidoSettings.blackholeEnabled)
+        glView.setBlackholeStrength(kaleidoSettings.blackholeStrength)
+        glView.setBlackholeShrinkRate(kaleidoSettings.blackholeShrinkRate)
+        glView.setBlackholeAlphaRadius(kaleidoSettings.blackholeAlphaRadius)
+        glView.setBlackholeWanderAmount(kaleidoSettings.blackholeWanderAmount)
+        glView.setPaletteMode(kaleidoSettings.paletteMode)
+        glView.setPaletteTint(kaleidoSettings.paletteTint)
+        glView.setPaletteMonoHue(kaleidoSettings.paletteMonoHue)
+        glView.setHarmonyType(kaleidoSettings.harmonyType)
+        glView.setHarmonyAnchorHue(kaleidoSettings.harmonyAnchorHue)
+        glView.setHarmonySaturation(kaleidoSettings.harmonySaturation)
+        glView.setHarmonyValue(kaleidoSettings.harmonyValue)
+        glView.setHarmonyStrength(kaleidoSettings.harmonyStrength)
+        glView.setLutEnabled(kaleidoSettings.lutSelection != "none")
+        glView.setLutStrength(kaleidoSettings.lutStrength)
+    }
+
+    // Resolve lutSelection to a CubeLut and upload whenever it changes.
+    // "none" clears the LUT; any other value is a bare asset ID (e.g. "warm").
+    // Old "builtin:X" persisted values are normalised to "X" on first read.
+    // Old "user:..." values (removed feature) are reset to "none".
+    LaunchedEffect(kaleidoSettings.lutSelection) {
+        val selection = kaleidoSettings.lutSelection
+        val id = when {
+            selection == "none"                   -> null
+            selection.startsWith("builtin:")      -> selection.removePrefix("builtin:")
+            selection.startsWith("user:")         -> { kaleidoVm.setLutSelection("none"); null }
+            else                                  -> selection
+        }
+        if (id == null) {
+            glView.setLut(null)
+        } else {
+            val lut = withContext(Dispatchers.IO) {
+                try {
+                    context.assets.open("luts/$id.cube").use { stream ->
+                        when (val r = parseCubeLut(id, stream)) {
+                            is CubeLutParseResult.Success -> r.lut
+                            is CubeLutParseResult.Failure -> null
+                        }
+                    }
+                } catch (e: Exception) { null }
+            }
+            if (lut != null) {
+                // Normalise "builtin:X" → "X" in persisted state
+                if (selection.startsWith("builtin:")) kaleidoVm.setLutSelection(id)
+                glView.setLut(lut)
+            } else {
+                kaleidoVm.setLutSelection("none"); glView.setLut(null)
+            }
+        }
+    }
+
+    // Auto-disable lightning after 5 s when the limit is ON.
+    // LaunchedEffect cancels and restarts whenever lightningEnabled or the limit flag changes,
+    // so turning lightning off manually before the deadline cleanly cancels the countdown.
+    LaunchedEffect(kaleidoSettings.lightningEnabled, kaleidoSettings.lightningSpritesLimit5s) {
+        if (kaleidoSettings.lightningEnabled && kaleidoSettings.lightningSpritesLimit5s) {
+            kotlinx.coroutines.delay(5_000L)
+            kaleidoVm.setLightningEnabled(false)
+        }
     }
 
     LaunchedEffect(kaleidoSettings.partyEnabled)     { partyEngine.enabled    = kaleidoSettings.partyEnabled }
@@ -895,6 +971,22 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                     Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
 
+                // SHAKEDIAG isolation button — DEBUG builds only; not present in release.
+                if (BuildConfig.DEBUG) {
+                    Spacer(Modifier.height(6.dp))
+                    val diagLabel = if (debugForceSilent) "DIAG: SILENT ON" else "DIAG: SILENT OFF"
+                    val diagColor = if (debugForceSilent) Color(0xFFFF2D78) else Color(0xFF666666)
+                    TextButton(onClick = {
+                        debugForceSilent = !debugForceSilent
+                        glView.setDebugForceSilent(debugForceSilent)
+                        android.util.Log.d("SHAKEDIAG",
+                            "forceSilent toggled -> $debugForceSilent  " +
+                            "(if shake PERSISTS -> renderer-driven; if STOPS -> audio-driven)")
+                    }) {
+                        Text(diagLabel, color = diagColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 audioFile?.let { af ->
                     Spacer(Modifier.height(6.dp))
                     Text(
@@ -1093,6 +1185,20 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            .pointerInput(kaleidoSettings.lightningEnabled) {
+                                if (!kaleidoSettings.lightningEnabled) return@pointerInput
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val c = event.changes.firstOrNull() ?: continue
+                                        glView.setLightningTouch(
+                                            c.position.x / size.width.toFloat(),
+                                            c.position.y / size.height.toFloat(),
+                                            c.pressed,
+                                        )
+                                    }
+                                }
+                            }
                             .pointerInput(Unit) {
                                 detectHorizontalDragGestures(
                                     onDragEnd = {
@@ -1643,6 +1749,24 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 onChromaAberrationEnabledChange  = { kaleidoVm.setChromaAberrationEnabled(it) },
                 onChromaAberrationIntensityChange = { kaleidoVm.setChromaAberrationIntensity(it) },
                 onChromaAberrationAudioReactChange = { kaleidoVm.setChromaAberrationAudioReact(it) },
+                onSuddenWarpEnabledChange        = { kaleidoVm.setSuddenWarpEnabled(it) },
+                onLightningEnabledChange         = { kaleidoVm.setLightningEnabled(it) },
+                onLightningSpritesLimit5sChange  = { kaleidoVm.setLightningSpritesLimit5s(it) },
+                onBlackholeEnabledChange      = { kaleidoVm.setBlackholeEnabled(it) },
+                onBlackholeStrengthChange     = { kaleidoVm.setBlackholeStrength(it) },
+                onBlackholeShrinkRateChange   = { kaleidoVm.setBlackholeShrinkRate(it) },
+                onBlackholeAlphaRadiusChange  = { kaleidoVm.setBlackholeAlphaRadius(it) },
+                onBlackholeWanderAmountChange = { kaleidoVm.setBlackholeWanderAmount(it) },
+                onPaletteModeChange      = { kaleidoVm.setPaletteMode(it) },
+                onPaletteTintChange      = { kaleidoVm.setPaletteTint(it) },
+                onPaletteMonoHueChange   = { kaleidoVm.setPaletteMonoHue(it) },
+                onHarmonyTypeChange      = { kaleidoVm.setHarmonyType(it) },
+                onHarmonyAnchorHueChange = { kaleidoVm.setHarmonyAnchorHue(it) },
+                onHarmonySaturationChange = { kaleidoVm.setHarmonySaturation(it) },
+                onHarmonyValueChange     = { kaleidoVm.setHarmonyValue(it) },
+                onHarmonyStrengthChange  = { kaleidoVm.setHarmonyStrength(it) },
+                onLutSelectionChange     = { kaleidoVm.setLutSelection(it) },
+                onLutStrengthChange      = { kaleidoVm.setLutStrength(it) },
                 onBundleApply                 = { it.applyToView(glView) },
                 onToggleLock                  = { kaleidoVm.toggleLock(it) },
             )
@@ -1905,11 +2029,31 @@ private fun KaleidoSettingsContent(
     onChromaAberrationEnabledChange: (Boolean) -> Unit,
     onChromaAberrationIntensityChange: (Float) -> Unit,
     onChromaAberrationAudioReactChange: (Boolean) -> Unit,
+    onSuddenWarpEnabledChange: (Boolean) -> Unit,
+    onLightningEnabledChange: (Boolean) -> Unit,
+    onLightningSpritesLimit5sChange: (Boolean) -> Unit,
+    onBlackholeEnabledChange: (Boolean) -> Unit,
+    onBlackholeStrengthChange: (Float) -> Unit,
+    onBlackholeShrinkRateChange: (Float) -> Unit,
+    onBlackholeAlphaRadiusChange: (Float) -> Unit,
+    onBlackholeWanderAmountChange: (Float) -> Unit,
+    onPaletteModeChange: (PaletteMode) -> Unit,
+    onPaletteTintChange: (Float) -> Unit,
+    onPaletteMonoHueChange: (Float) -> Unit,
+    onHarmonyTypeChange: (ColorHarmony) -> Unit,
+    onHarmonyAnchorHueChange: (Float) -> Unit,
+    onHarmonySaturationChange: (Float) -> Unit,
+    onHarmonyValueChange: (Float) -> Unit,
+    onHarmonyStrengthChange: (Float) -> Unit,
+    onLutSelectionChange: (String) -> Unit,
+    onLutStrengthChange: (Float) -> Unit,
     onBundleApply: (StyleBundle) -> Unit,
     onToggleLock: (LockableParam) -> Unit,
 ) {
     var showColorPicker by rememberSaveable { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+    val sheetContext = LocalContext.current
+    val assetLuts = remember { BuiltinLuts.listFromAssets(sheetContext.assets) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2512,6 +2656,473 @@ private fun KaleidoSettingsContent(
                     checked         = settings.chromaAberrationAudioReact,
                     onCheckedChange = { onChromaAberrationAudioReactChange(it) },
                 )
+            }
+        }
+
+        // Sudden Warp
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onSuddenWarpEnabledChange(!settings.suddenWarpEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sudden Warp", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Beat-triggered traveling wave distortion",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LockIconButton(LockableParam.SUDDEN_WARP, settings.lockedParams, onToggleLock)
+            Switch(
+                checked         = settings.suddenWarpEnabled,
+                onCheckedChange = { onSuddenWarpEnabledChange(it) },
+            )
+        }
+
+        // Lightning Overlay
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onLightningEnabledChange(!settings.lightningEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Lightning Overlay", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Fractal plasma lightning plates — touch to guide",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.lightningEnabled,
+                onCheckedChange = { onLightningEnabledChange(it) },
+            )
+        }
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onLightningSpritesLimit5sChange(!settings.lightningSpritesLimit5s) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Limit Lightning Sprites to 5s", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    if (settings.lightningSpritesLimit5s) "Auto-off after 5 s" else "Stays on until manually cleared",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked         = settings.lightningSpritesLimit5s,
+                onCheckedChange = { onLightningSpritesLimit5sChange(it) },
+            )
+        }
+
+        // ── BLACKHOLE ─────────────────────────────────────────────────────────
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onBlackholeEnabledChange(!settings.blackholeEnabled) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Blackhole", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                Text(
+                    "Gravitational lens warp with event horizon",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            LockIconButton(LockableParam.BLACKHOLE_ENABLED, settings.lockedParams, onToggleLock)
+            Switch(
+                checked         = settings.blackholeEnabled,
+                onCheckedChange = { onBlackholeEnabledChange(it) },
+            )
+        }
+
+        if (settings.blackholeEnabled) {
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Feedback",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.blackholeStrength,
+                    onValueChange = { onBlackholeStrengthChange(it) },
+                    valueRange    = 0f..0.98f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${"%.2f".format(settings.blackholeStrength)}",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.BLACKHOLE_STRENGTH, settings.lockedParams, onToggleLock)
+            }
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Tunnel",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.blackholeShrinkRate,
+                    onValueChange = { onBlackholeShrinkRateChange(it) },
+                    valueRange    = 0.90f..0.999f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${"%.3f".format(settings.blackholeShrinkRate)}",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.BLACKHOLE_SHRINK_RATE, settings.lockedParams, onToggleLock)
+            }
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Edge bleed",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.blackholeAlphaRadius,
+                    onValueChange = { onBlackholeAlphaRadiusChange(it) },
+                    valueRange    = 0.1f..0.9f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${"%.2f".format(settings.blackholeAlphaRadius)}",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.BLACKHOLE_ALPHA_RADIUS, settings.lockedParams, onToggleLock)
+            }
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Wander",
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = Color.White,
+                    modifier = Modifier.width(80.dp),
+                )
+                Slider(
+                    value         = settings.blackholeWanderAmount,
+                    onValueChange = { onBlackholeWanderAmountChange(it) },
+                    valueRange    = 0f..0.02f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.blackholeWanderAmount * 1000).toInt()}‰",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.BLACKHOLE_WANDER, settings.lockedParams, onToggleLock)
+            }
+        }
+
+        // ── PALETTE ───────────────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier          = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Palette",
+                style      = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color      = Color.White,
+                modifier   = Modifier.weight(1f),
+            )
+            LockIconButton(LockableParam.PALETTE_MODE, settings.lockedParams, onToggleLock)
+        }
+        Spacer(Modifier.height(8.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding        = PaddingValues(horizontal = 4.dp),
+        ) {
+            items(PaletteMode.entries) { mode ->
+                FilterChip(
+                    selected    = settings.paletteMode == mode,
+                    onClick     = { onPaletteModeChange(mode) },
+                    label       = { Text(mode.label) },
+                    leadingIcon = if (settings.paletteMode == mode) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                )
+            }
+        }
+
+        if (settings.paletteMode != PaletteMode.Off) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Tint", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.paletteTint,
+                    onValueChange = { onPaletteTintChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.paletteTint * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.PALETTE_TINT, settings.lockedParams, onToggleLock)
+            }
+        }
+
+        if (settings.paletteMode == PaletteMode.Monochrome) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Hue", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.paletteMonoHue,
+                    onValueChange = { onPaletteMonoHueChange(it) },
+                    valueRange    = 0f..360f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${settings.paletteMonoHue.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.PALETTE_MONO_HUE, settings.lockedParams, onToggleLock)
+            }
+        }
+
+        if (settings.paletteMode == PaletteMode.Harmony) {
+            Spacer(Modifier.height(8.dp))
+            // Harmony type picker
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Type", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                LazyRow(
+                    modifier              = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding        = PaddingValues(horizontal = 4.dp),
+                ) {
+                    items(ColorHarmony.entries) { h ->
+                        FilterChip(
+                            selected    = settings.harmonyType == h,
+                            onClick     = { onHarmonyTypeChange(h) },
+                            label       = { Text(h.displayName(), style = MaterialTheme.typography.bodySmall) },
+                            leadingIcon = if (settings.harmonyType == h) {
+                                { Icon(Icons.Default.Check, contentDescription = null) }
+                            } else null,
+                        )
+                    }
+                }
+                LockIconButton(LockableParam.PALETTE_HARMONY_TYPE, settings.lockedParams, onToggleLock)
+            }
+            // Anchor hue
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Anchor", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.harmonyAnchorHue,
+                    onValueChange = { onHarmonyAnchorHueChange(it) },
+                    valueRange    = 0f..360f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${settings.harmonyAnchorHue.toInt()}°",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.PALETTE_HARMONY_ANCHOR, settings.lockedParams, onToggleLock)
+            }
+            // Strength
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Strength", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.harmonyStrength,
+                    onValueChange = { onHarmonyStrengthChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.harmonyStrength * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.PALETTE_HARMONY_STRENGTH, settings.lockedParams, onToggleLock)
+            }
+            // Saturation target
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Sat", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.harmonySaturation,
+                    onValueChange = { onHarmonySaturationChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.harmonySaturation * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+            // Value target
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Val", modifier = Modifier.width(72.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value         = settings.harmonyValue,
+                    onValueChange = { onHarmonyValueChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.harmonyValue * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+            }
+        }
+
+        // ── SKIN / IMAGE LUT ─────────────────────────────────────────────────────
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Skin / Image LUT",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+            )
+            LockIconButton(LockableParam.LUT_SELECTION, settings.lockedParams, onToggleLock)
+        }
+        Spacer(Modifier.height(8.dp))
+        // Normalise old "builtin:X" persisted values so chip highlights work during migration.
+        val activeLutId = settings.lutSelection.removePrefix("builtin:")
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+        ) {
+            item {
+                FilterChip(
+                    selected = activeLutId == "none",
+                    onClick  = { onLutSelectionChange("none") },
+                    label    = { Text("None") },
+                    leadingIcon = if (activeLutId == "none") {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                )
+            }
+            // Bundled asset LUTs — enumerated from assets/luts/ at runtime, no hardcoded names
+            items(assetLuts) { entry ->
+                FilterChip(
+                    selected = activeLutId == entry.id,
+                    onClick  = { onLutSelectionChange(entry.id) },
+                    label    = { Text(entry.label) },
+                    leadingIcon = if (activeLutId == entry.id) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else null,
+                )
+            }
+        }
+
+        if (activeLutId != "none") {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Strength",
+                    modifier = Modifier.width(72.dp),
+                    color    = Color.White,
+                    style    = MaterialTheme.typography.bodyMedium,
+                )
+                Slider(
+                    value         = settings.lutStrength,
+                    onValueChange = { onLutStrengthChange(it) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    text       = "${(settings.lutStrength * 100).toInt()}%",
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color      = Color.White,
+                    modifier   = Modifier.width(48.dp),
+                )
+                LockIconButton(LockableParam.LUT_STRENGTH, settings.lockedParams, onToggleLock)
             }
         }
 

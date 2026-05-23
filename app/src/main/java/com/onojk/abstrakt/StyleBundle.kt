@@ -26,6 +26,11 @@ data class StyleBundle(
     val chromaAberrationEnabled: Boolean,
     val chromaAberrationIntensity: Float,
     val chromaAberrationAudioReact: Boolean,
+    val blackholeEnabled: Boolean,
+    val blackholeStrength: Float,
+    val blackholeShrinkRate: Float,
+    val blackholeAlphaRadius: Float,
+    val blackholeWanderAmount: Float,
 ) {
     companion object {
         val DEFAULT = StyleBundle(
@@ -52,6 +57,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val CALM = StyleBundle(
@@ -78,6 +88,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val AGGRESSIVE = StyleBundle(
@@ -104,6 +119,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val COSMIC = StyleBundle(
@@ -130,6 +150,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = true,
+            blackholeStrength   = 0.72f,
+            blackholeShrinkRate = 0.975f,
+            blackholeAlphaRadius  = 0.30f,
+            blackholeWanderAmount = 0.008f,
         )
 
         val VINTAGE = StyleBundle(
@@ -156,6 +181,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val MINIMAL = StyleBundle(
@@ -182,6 +212,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = false,
             chromaAberrationIntensity = 0.008f,
             chromaAberrationAudioReact = false,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val PSYCHEDELIC = StyleBundle(
@@ -208,6 +243,11 @@ data class StyleBundle(
             chromaAberrationEnabled  = true,
             chromaAberrationIntensity = 0.012f,
             chromaAberrationAudioReact = true,
+            blackholeEnabled    = false,
+            blackholeStrength   = 0.5f,
+            blackholeShrinkRate = 0.97f,
+            blackholeAlphaRadius  = 0.5f,
+            blackholeWanderAmount = 0.005f,
         )
 
         val ALL: List<StyleBundle> = listOf(
@@ -239,4 +279,9 @@ fun StyleBundle.applyToView(view: AbstraktGLSurfaceView) {
     view.setChromaAberrationEnabled(chromaAberrationEnabled)
     view.setChromaAberrationIntensity(chromaAberrationIntensity)
     view.setChromaAberrationAudioReact(chromaAberrationAudioReact)
+    view.setBlackholeEnabled(blackholeEnabled)
+    view.setBlackholeStrength(blackholeStrength)
+    view.setBlackholeShrinkRate(blackholeShrinkRate)
+    view.setBlackholeAlphaRadius(blackholeAlphaRadius)
+    view.setBlackholeWanderAmount(blackholeWanderAmount)
 }

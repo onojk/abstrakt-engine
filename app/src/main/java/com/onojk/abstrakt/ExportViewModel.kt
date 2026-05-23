@@ -1,6 +1,8 @@
 package com.onojk.abstrakt
 
 import android.app.Application
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
@@ -21,9 +23,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
+private fun supports4KExport(): Boolean = runCatching {
+    MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
+        if (!info.isEncoder) return@any false
+        if (!info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }) return@any false
+        info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            .videoCapabilities
+            ?.isSizeSupported(3840, 2160) == true
+    }
+}.getOrDefault(false)
+
 enum class SpaceStatus { OK, SOFT_WARN, HARD_BLOCK }
 
 class ExportViewModel(app: Application) : AndroidViewModel(app) {
+
+    /** True if the device's H.264 encoder supports 3840×2160. Queried once at construction. */
+    val is4KSupported: Boolean = supports4KExport()
 
     private val kaleidoStore = KaleidoSettingsStore(app)
 
@@ -66,6 +81,16 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _selectedFps = MutableStateFlow(60)
     val selectedFps: StateFlow<Int> = _selectedFps.asStateFlow()
+
+    private val _noSongDurationSec = MutableStateFlow(30)
+    val noSongDurationSec: StateFlow<Int> = _noSongDurationSec.asStateFlow()
+
+    fun setNoSongDurationSec(value: Int) { _noSongDurationSec.value = clampDuration(value) }
+
+    private val _tripleEchoBloom = MutableStateFlow(false)
+    val tripleEchoBloom: StateFlow<Boolean> = _tripleEchoBloom.asStateFlow()
+
+    fun selectTripleEchoBloom(enabled: Boolean) { _tripleEchoBloom.value = enabled }
 
     private val _isLoadingAudio = MutableStateFlow(false)
     val isLoadingAudio: StateFlow<Boolean> = _isLoadingAudio.asStateFlow()
@@ -138,12 +163,16 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             combine(_selectedRes, _selectedAudio, _currentAudioFile, _pickedAudioFile) { res, src, cur, picked ->
+                Triple(res, src, cur to picked)
+            }.combine(_noSongDurationSec) { triple, durOverride ->
+                val (res, src, pair) = triple
+                val (cur, picked) = pair
                 val resolved = when (src) {
                     AudioSource.UseCurrent -> cur
                     AudioSource.PickNew    -> picked
                     AudioSource.Silent     -> null
                 }
-                val durSec   = resolved?.let { it.durationMs / 1000.0 } ?: 60.0
+                val durSec   = resolved?.let { it.durationMs / 1000.0 } ?: durOverride.toDouble()
                 val hasAudio = resolved != null
                 StorageEstimator.estimateBytes(res.bitrate, durSec, hasAudio)
             }.collect { _estimatedBytes.value = it }
@@ -267,6 +296,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     height                       = res.height,
                     fps                          = fps,
                     bitrate                      = res.bitrate,
+                    durationSeconds              = if (resolvedAudio == null) _noSongDurationSec.value.toFloat() else 5f,
                     audioFile                    = resolvedAudio,
                     exportMode                   = mode,
                     userSkinFilePath             = userSkinPath,
@@ -288,6 +318,9 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     partyIntensity               = kaleido.partyIntensity,
                     reactiveEnabled              = kaleido.reactiveEnabled,
                     reactiveIntensity            = kaleido.reactiveIntensity,
+                    paletteMode                  = kaleido.paletteMode,
+                    paletteTint                  = kaleido.paletteTint,
+                    paletteMonoHue               = kaleido.paletteMonoHue,
                     bassZoomIntensity            = kaleido.bassZoomIntensity,
                     contrast                     = kaleido.contrast,
                     contrastPasses               = kaleido.contrastPasses,
@@ -298,6 +331,7 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
                     distortionPlusRoll           = kaleido.distortionPlusRoll,
                     lockedParams                 = kaleido.lockedParams,
                     beatReactivity               = kaleido.beatReactivity,
+                    tripleEchoBloom              = _tripleEchoBloom.value,
                 )
                 val result = exporter.export { fraction, phase ->
                     _progressValue.value = fraction
@@ -391,6 +425,8 @@ class ExportViewModel(app: Application) : AndroidViewModel(app) {
         _beatResponse.value         = true
         _selectedRes.value          = ExportResolution.FHD_1080P
         _selectedFps.value          = 60
+        _noSongDurationSec.value    = 30
+        _tripleEchoBloom.value      = false
         _isLoadingAudio.value       = false
         _progressValue.value        = 0f
         _progressPhase.value        = ""
