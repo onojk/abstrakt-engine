@@ -872,6 +872,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         if (mode != lastStampedMode) {
             if (mode is Mode.Builtin || mode is Mode.UserSlot) {
                 if (stampFullSkinIntoPainterFbo(mode)) lastStampedMode = mode
+            } else if (mode == Mode.Cyclone && stampFullImageIntoPainterFbo()) {
+                lastStampedMode = mode
             } else {
                 clearPainterFbo()
                 lastStampedMode = mode
@@ -1134,6 +1136,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             cProg.setInt("u_lut_enabled", 1)
             lutDiagPending = false
         } else {
+            // u_lut must always point to unit 1, not the default 0.
+            // CYCLONE_FRAG declares sampler3D u_lut — leaving it at unit 0 (where the
+            // 2D painterTexture is bound) triggers GL_INVALID_OPERATION at draw time in ES 3.0.
+            cProg.setInt("u_lut", 1)
             cProg.setInt("u_lut_enabled", 0)
             lutDiagPending = false
         }
@@ -1635,6 +1641,27 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         Log.d(TAG, "stampFullSkin: $mode texId=$sTex")
+        return true
+    }
+
+    // Fills the entire painterFBO by blitting imageTexture directly — same blit path as
+    // stampFullSkinIntoPainterFbo, avoids IMAGE shader/uniform issues on cold start.
+    private fun stampFullImageIntoPainterFbo(): Boolean {
+        val bProg = blitProgram ?: run { Log.w(TAG, "stampFullImage SKIP: blitProgram=null"); return false }
+        if (imageTexture == 0) { Log.w(TAG, "stampFullImage SKIP: imageTexture=0"); return false }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
+        GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+        bProg.use()
+        bProg.setInt("u_tex", 0)
+        drawQuad()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return true
     }
 

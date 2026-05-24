@@ -194,7 +194,7 @@ class MainActivity : ComponentActivity() {
             ctrl.hide(WindowInsetsCompat.Type.systemBars())
         }
         setContent {
-            MyFistAppTheme {
+            MyFistAppTheme(darkTheme = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val billingMgr = (LocalContext.current.applicationContext as AbstraktApp).billingManager
                     val hasPro by billingMgr.hasProState.collectAsState()
