@@ -20,8 +20,8 @@ android {
         applicationId = "com.onojk.abstrakt"
         minSdk = 33
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0"
+        versionCode = 14
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -78,8 +78,9 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-crashlytics")
     implementation("com.google.firebase:firebase-analytics-ktx")
-    implementation("com.google.android.gms:play-services-ads:23.6.0")
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
+    implementation("com.google.android.gms:play-services-ads:25.3.0")
+    implementation("com.google.android.ump:user-messaging-platform:4.0.0")
+    implementation("com.android.billingclient:billing-ktx:9.0.0")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
