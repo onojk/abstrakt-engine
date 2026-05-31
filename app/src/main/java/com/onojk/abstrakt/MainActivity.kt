@@ -133,7 +133,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -165,6 +165,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.analytics
+import androidx.lifecycle.lifecycleScope
+import java.util.concurrent.atomic.AtomicBoolean
 
 // Carousel mode model — sealed hierarchy for the swipe carousel.
 sealed class Mode {
@@ -181,12 +183,13 @@ internal val DimWhite = Color(0x99FFFFFF)
 
 class MainActivity : ComponentActivity() {
     private val interstitialAdManager by lazy { InterstitialAdManager(this) }
+    private val mobileAdsInitialized = AtomicBoolean(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val firebaseAnalytics = Firebase.analytics
         firebaseAnalytics.logEvent(FirebaseAnalytics.Event.APP_OPEN, null)
-        interstitialAdManager.preload()
+        initializeMobileAdsWithConsent()   // consent → SDK init → ad preload
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         WindowInsetsControllerCompat(window, window.decorView).let { ctrl ->
@@ -204,6 +207,59 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Runs the UMP consent flow on every launch (required by Google).
+     * Only calls MobileAds.initialize() once consent is established.
+     *
+     * Flow:
+     *  - Non-EEA / consent already given  → canRequestAds() is true immediately
+     *                                        → SDK initialises right away
+     *  - EEA first launch                 → form is shown; callback fires after dismiss
+     *                                        → SDK initialises then
+     *  - Consent update fails             → fall back to canRequestAds() gate
+     */
+    private fun initializeMobileAdsWithConsent() {
+        // getConsentInformation() is the correct UMP 4.x API — not ConsentInformation.getInstance()
+        val consentInfo = com.google.android.ump.UserMessagingPlatform.getConsentInformation(this)
+        val params = com.google.android.ump.ConsentRequestParameters.Builder()
+            .setTagForUnderAgeOfConsent(false)
+            .build()
+
+        consentInfo.requestConsentInfoUpdate(
+            this, params,
+            {
+                // Consent info refreshed — show form if still required.
+                com.google.android.ump.UserMessagingPlatform.loadAndShowConsentFormIfRequired(
+                    this@MainActivity,
+                ) { formError ->
+                    if (formError != null) {
+                        android.util.Log.w("AdMob", "Consent form error: ${formError.message}")
+                    }
+                    if (consentInfo.canRequestAds()) initializeMobileAds()
+                }
+            },
+            { requestConsentError: com.google.android.ump.FormError ->
+                android.util.Log.w("AdMob", "Consent info update failed: ${requestConsentError.message}")
+                if (consentInfo.canRequestAds()) initializeMobileAds()
+            },
+        )
+
+        // If consent was already granted on a previous launch, initialize immediately
+        // without waiting for the network round-trip above to complete.
+        if (consentInfo.canRequestAds()) initializeMobileAds()
+    }
+
+    /** Initializes the GMA SDK once on a background thread, then preloads the interstitial. */
+    private fun initializeMobileAds() {
+        if (!mobileAdsInitialized.compareAndSet(false, true)) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            com.google.android.gms.ads.MobileAds.initialize(this@MainActivity) {
+                // Callback fires on the main thread; preload is safe to call here.
+                interstitialAdManager.preload()
             }
         }
     }
@@ -1276,13 +1332,13 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector        = Icons.Default.KeyboardArrowDown,
+                        imageVector        = Icons.Default.TouchApp,
                         contentDescription = null,
                         tint               = NeonCyan,
                         modifier           = Modifier.size(48.dp),
                     )
                     Text(
-                        text       = "Swipe down from the top edge",
+                        text       = "Tap anywhere",
                         color      = NeonCyan,
                         fontWeight = FontWeight.Bold,
                         fontSize   = 16.sp,
@@ -3509,9 +3565,16 @@ private fun KaleidoSettingsContent(
         )
         Spacer(Modifier.height(8.dp))
 
-        val billingManager = (LocalContext.current.applicationContext as AbstraktApp).billingManager
+        // Capture context once in Composable scope; reused by both the activity lookup
+        // and the Toast fallback inside onClick (which is a plain lambda, not Composable).
+        val localContext = LocalContext.current
+        val billingManager = (localContext.applicationContext as AbstraktApp).billingManager
         val hasPro by billingManager.hasProState.collectAsState()
-        val activity = LocalContext.current as? Activity
+        val activity = localContext.findActivity()
+        // Price from Play — localised and formatted by the Play Billing library.
+        // Falls back to a display string while the billing client is still connecting.
+        val price by billingManager.formattedPrice.collectAsState()
+        val priceLabel = price ?: "$2.99"
 
         if (hasPro) {
             Text(
@@ -3523,18 +3586,27 @@ private fun KaleidoSettingsContent(
         } else {
             Column {
                 Text(
-                    "Free version is ad-supported. One-time $2.99 purchase removes all ads.",
+                    "Free version is ad-supported. One-time $priceLabel purchase removes all ads.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        activity?.let { billingManager.launchPurchaseFlow(it) }
+                        if (activity != null) {
+                            billingManager.launchPurchaseFlow(activity)
+                        } else {
+                            android.util.Log.e("BillingUI", "launchPurchaseFlow: activity is null — context chain broken")
+                            android.widget.Toast.makeText(
+                                localContext,
+                                "Unable to open purchase screen — please restart the app.",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
                 ) {
-                    Text("Remove ads — $2.99", color = Color.Black, fontWeight = FontWeight.SemiBold)
+                    Text("Remove ads — $priceLabel", color = Color.Black, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
