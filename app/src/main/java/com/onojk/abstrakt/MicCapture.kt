@@ -1,5 +1,6 @@
 package com.onojk.abstrakt
 
+import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -24,6 +25,8 @@ class MicCapture(private val analyzer: StreamingAnalyzer) {
         job = scope.launch(Dispatchers.IO) {
             val minBuf  = AudioRecord.getMinBufferSize(sampleRate, channelCfg, encoding)
             val bufSize = maxOf(minBuf, 4096) * 2
+            // Permission is checked and requested at runtime in MainActivity before MicCapture.start()
+            @SuppressLint("MissingPermission")
             val record  = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 sampleRate, channelCfg, encoding, bufSize,
