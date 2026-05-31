@@ -51,10 +51,10 @@ enum class ShapeKind {
 data class KaleidoSettings(
     val foldCount: Int = 12,
     val squareRotationLocked: Boolean = false,
-    val frameShape: FrameShape = FrameShape.Circle,
+    val frameShape: FrameShape = FrameShape.None,
     val frameColorArgb: Long = 0xFFFFFFFFL,
     val zoomMultiplier: Float = 1.0f,
-    val shapeKind: ShapeKind = ShapeKind.Cylinder,
+    val shapeKind: ShapeKind = ShapeKind.Cube,
     val invertColors: Boolean = false,
     val colorizeEnabled: Boolean = false,
     val colorizeHue: Float = 0f,        // degrees 0..360
@@ -67,9 +67,9 @@ data class KaleidoSettings(
     val reactiveEnabled: Boolean = false,
     val reactiveIntensity: Float = 0.5f,
     val bassZoomIntensity: Float = 0.5f,    // 0=off, 1=max bass-driven zoom pulse
-    val contrast: Float = 1.0f,            // 0..2, 1=passthrough
-    val contrastPasses: Int = 1,           // 1..6, >1=posterization
-    val saturation: Float = 1.0f,          // 0..2, 1=passthrough
+    val contrast: Float = 2.0f,            // 0..2, 1=passthrough; 2.0=full
+    val contrastPasses: Int = 6,           // 1..6, >1=posterization; 6=full
+    val saturation: Float = 2.0f,          // 0..2, 1=passthrough; 2.0=full
     val distortionPlusEnabled: Boolean = false,
     val distortionPlusYaw: Float = 0f,     // -180..180 degrees
     val distortionPlusPitch: Float = 0f,   // -90..90 degrees

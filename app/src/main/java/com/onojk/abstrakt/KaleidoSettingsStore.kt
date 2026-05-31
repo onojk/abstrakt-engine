@@ -81,12 +81,12 @@ class KaleidoSettingsStore(private val context: Context) {
             squareRotationLocked = prefs[KaleidoKeys.SQUARE_ROT_LOCKED] ?: false,
             frameShape           = prefs[KaleidoKeys.FRAME_SHAPE]
                 ?.let { runCatching { FrameShape.valueOf(it) }.getOrNull() }
-                ?: FrameShape.Circle,
+                ?: FrameShape.None,
             frameColorArgb       = prefs[KaleidoKeys.FRAME_COLOR_ARGB] ?: 0xFFFFFFFFL,
             zoomMultiplier       = (prefs[KaleidoKeys.ZOOM_MULTIPLIER] ?: 1.0f).coerceIn(0.5f, 1.5f),
             shapeKind            = prefs[KaleidoKeys.SHAPE_KIND]
                 ?.let { runCatching { ShapeKind.valueOf(it) }.getOrNull() }
-                ?: ShapeKind.Cylinder,
+                ?: ShapeKind.Cube,
             invertColors         = prefs[KaleidoKeys.INVERT_COLORS] ?: false,
             colorizeEnabled      = prefs[KaleidoKeys.COLORIZE_ENABLED] ?: false,
             colorizeHue          = (prefs[KaleidoKeys.COLORIZE_HUE] ?: 0f).coerceIn(0f, 360f),
@@ -99,9 +99,9 @@ class KaleidoSettingsStore(private val context: Context) {
             reactiveEnabled      = prefs[KaleidoKeys.REACTIVE_ENABLED]   ?: false,
             reactiveIntensity    = (prefs[KaleidoKeys.REACTIVE_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
             bassZoomIntensity    = (prefs[KaleidoKeys.BASS_ZOOM_INTENSITY] ?: 0.5f).coerceIn(0f, 1f),
-            contrast             = (prefs[KaleidoKeys.CONTRAST] ?: 1.0f).coerceIn(0f, 2f),
-            contrastPasses       = (prefs[KaleidoKeys.CONTRAST_PASSES] ?: 1).coerceIn(1, 6),
-            saturation           = (prefs[KaleidoKeys.SATURATION] ?: 1.0f).coerceIn(0f, 2f),
+            contrast             = (prefs[KaleidoKeys.CONTRAST] ?: 2.0f).coerceIn(0f, 2f),
+            contrastPasses       = (prefs[KaleidoKeys.CONTRAST_PASSES] ?: 6).coerceIn(1, 6),
+            saturation           = (prefs[KaleidoKeys.SATURATION] ?: 2.0f).coerceIn(0f, 2f),
             distortionPlusEnabled = prefs[KaleidoKeys.DISTORTION_PLUS_ENABLED] ?: false,
             distortionPlusYaw    = (prefs[KaleidoKeys.DISTORTION_PLUS_YAW] ?: 0f).coerceIn(-180f, 180f),
             distortionPlusPitch  = (prefs[KaleidoKeys.DISTORTION_PLUS_PITCH] ?: 0f).coerceIn(-90f, 90f),
