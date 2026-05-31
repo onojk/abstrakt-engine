@@ -165,7 +165,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.analytics
-import androidx.lifecycle.lifecycleScope
 import java.util.concurrent.atomic.AtomicBoolean
 
 // Carousel mode model — sealed hierarchy for the swipe carousel.
@@ -253,14 +252,13 @@ class MainActivity : ComponentActivity() {
         if (consentInfo.canRequestAds()) initializeMobileAds()
     }
 
-    /** Initializes the GMA SDK once on a background thread, then preloads the interstitial. */
+    /** Initializes the GMA SDK once, then preloads the interstitial on the main thread. */
     private fun initializeMobileAds() {
         if (!mobileAdsInitialized.compareAndSet(false, true)) return
-        lifecycleScope.launch(Dispatchers.IO) {
-            com.google.android.gms.ads.MobileAds.initialize(this@MainActivity) {
-                // Callback fires on the main thread; preload is safe to call here.
-                interstitialAdManager.preload()
-            }
+        com.google.android.gms.ads.MobileAds.initialize(this@MainActivity) {
+            // MobileAds.initialize callback fires on a background thread; AdMob load/show
+            // calls (including InterstitialAd.load) must run on the main UI thread.
+            runOnUiThread { interstitialAdManager.preload() }
         }
     }
 }

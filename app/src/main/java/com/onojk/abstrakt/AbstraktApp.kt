@@ -34,9 +34,9 @@ class AbstraktApp : Application() {
         com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance()
             .setCrashlyticsCollectionEnabled(crashReportingEnabled)
 
-        com.google.android.gms.ads.MobileAds.initialize(this) { initStatus ->
-            Log.d("AdMob", "AdMob initialized: ${initStatus.adapterStatusMap}")
-        }
+        // MobileAds.initialize() is called from MainActivity after the UMP consent flow
+        // completes, so it is NOT called here. Calling it before consent violates Google's
+        // requirement that consent be obtained before SDK initialization.
 
         billingManager.initialize()
     }
