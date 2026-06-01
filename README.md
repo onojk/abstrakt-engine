@@ -2,7 +2,7 @@
 
 A native Android kaleidoscope visualizer that wraps 3D geometry in audio-reactive painter textures, folds it into mandalas in real time, and exports the result as H.264 video. Part of a trilogy with [onojk/abstrakt](https://github.com/onojk/abstrakt) (Python, the original) and [onojk/abstrakt-deck](https://github.com/onojk/abstrakt-deck) (Rust desktop).
 
-**🎬 Coming to Google Play soon.** ⭐ Star this repo to be notified when it ships.
+[![Get it on Google Play](https://img.shields.io/badge/Google%20Play-Download-brightgreen?logo=google-play)](https://play.google.com/store/apps/details?id=com.onojk.abstrakt)
 
 ---
 
