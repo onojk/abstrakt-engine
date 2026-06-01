@@ -20,8 +20,8 @@ android {
         applicationId = "com.onojk.abstrakt"
         minSdk = 33
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.0.2"
+        versionCode = 16
+        versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
