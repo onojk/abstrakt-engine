@@ -66,6 +66,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import com.onojk.abstrakt.audio.AudioFile
 import java.io.IOException
 import java.time.LocalDateTime
@@ -93,6 +101,7 @@ fun ExportWizard(
     val pickedAudio     by vm.pickedAudioFile.collectAsStateWithLifecycle()
     val beatResponse    by vm.beatResponse.collectAsStateWithLifecycle()
     val selectedRes     by vm.selectedRes.collectAsStateWithLifecycle()
+    val selectedFps     by vm.selectedFps.collectAsStateWithLifecycle()
     val isLoadingAudio  by vm.isLoadingAudio.collectAsStateWithLifecycle()
     val progressValue   by vm.progressValue.collectAsStateWithLifecycle()
     val progressPhase   by vm.progressPhase.collectAsStateWithLifecycle()
@@ -110,6 +119,8 @@ fun ExportWizard(
     val prevExportsCount by vm.previousExportsCount.collectAsStateWithLifecycle()
     val prevExportsBytes by vm.previousExportsBytes.collectAsStateWithLifecycle()
     val showOutOfSpace   by vm.showOutOfSpaceDialog.collectAsStateWithLifecycle()
+    val noSongDurationSec  by vm.noSongDurationSec.collectAsStateWithLifecycle()
+    val tripleEchoBloom    by vm.tripleEchoBloom.collectAsStateWithLifecycle()
 
     // Refresh storage once on wizard open.
     LaunchedEffect(Unit) { vm.refreshStorageState() }
@@ -170,6 +181,16 @@ fun ExportWizard(
         )
     }
 
+    // ── Derived state ─────────────────────────────────────────────────────────
+    val resolvedAudioForStep = when (selectedAudio) {
+        AudioSource.UseCurrent -> currentAudio
+        AudioSource.PickNew    -> pickedAudio
+        AudioSource.Silent     -> null
+    }
+    val hasAudio        = resolvedAudioForStep != null
+    val audioFileDurMs  = resolvedAudioForStep?.durationMs ?: 0L
+    val hasMotionSource = exportKaleido.partyEnabled || exportKaleido.randomEnabled || exportKaleido.reactiveEnabled
+
     // ── Step routing ──────────────────────────────────────────────────────────
     when (step) {
         WizardStep.MODE -> Step1Mode(
@@ -214,10 +235,21 @@ fun ExportWizard(
         )
 
         WizardStep.RESOLUTION -> Step4Resolution(
-            selected   = selectedRes,
-            onSelect   = { vm.selectResolution(it) },
-            onBack     = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
-            onStart    = { vm.navTo(WizardStep.KALEIDO) },
+            selected               = selectedRes,
+            onSelect               = { vm.selectResolution(it) },
+            selectedFps            = selectedFps,
+            onSelectFps            = { vm.selectFps(it) },
+            is4KSupported          = vm.is4KSupported,
+            hasAudio               = hasAudio,
+            audioFileDurationMs    = audioFileDurMs,
+            noSongDurationSec      = noSongDurationSec,
+            onSetNoSongDuration    = { vm.setNoSongDurationSec(it) },
+            hasMotionSource        = hasMotionSource,
+            tripleEchoBloom        = tripleEchoBloom && selectedMode != Mode.Cyclone,
+            onSelectTripleEchoBloom = { vm.selectTripleEchoBloom(it) },
+            isCycloneMode          = selectedMode == Mode.Cyclone,
+            onBack                 = { vm.navTo(if (selectedAudio == AudioSource.Silent) WizardStep.AUDIO else WizardStep.BEAT) },
+            onStart                = { vm.navTo(WizardStep.KALEIDO) },
         )
 
         WizardStep.KALEIDO -> Step5Kaleido(
@@ -396,24 +428,186 @@ private fun Step3Beat(
 private fun Step4Resolution(
     selected: ExportResolution,
     onSelect: (ExportResolution) -> Unit,
+    selectedFps: Int,
+    onSelectFps: (Int) -> Unit,
+    is4KSupported: Boolean,
+    hasAudio: Boolean,
+    audioFileDurationMs: Long,
+    noSongDurationSec: Int,
+    onSetNoSongDuration: (Int) -> Unit,
+    hasMotionSource: Boolean,
+    tripleEchoBloom: Boolean,
+    onSelectTripleEchoBloom: (Boolean) -> Unit,
+    isCycloneMode: Boolean,
     onBack: () -> Unit,
     onStart: () -> Unit,
 ) {
+    val is4K = selected == ExportResolution.UHD_4K
+    var durationText by rememberSaveable(noSongDurationSec) {
+        mutableStateOf(formatDuration(noSongDurationSec))
+    }
+    val commitDuration = {
+        val parsed  = parseDurationInput(durationText)
+        val clamped = if (parsed != null) clampDuration(parsed) else noSongDurationSec
+        onSetNoSongDuration(clamped)
+        durationText = formatDuration(clamped)
+    }
+
     WizardScaffold(
-        title        = "Resolution",
+        title        = "Resolution & frame rate",
         onBack       = onBack,
         primaryLabel = "Continue",
         onPrimary    = onStart,
     ) {
         Spacer(Modifier.height(8.dp))
         ExportResolution.entries.forEach { res ->
-            val is4K = res == ExportResolution.UHD_4K
+            val is4KEntry = res == ExportResolution.UHD_4K
+            val enabled   = !is4KEntry || is4KSupported
             RadioRow(
-                selected = selected == res,
-                label    = res.label,
-                sublabel = if (is4K) "Significantly slower; large file (~100 MB/min)" else null,
-                sublabelColor = if (is4K) Color(0xFFFFAA00) else null,
-                onClick  = { onSelect(res) },
+                selected      = selected == res,
+                enabled       = enabled,
+                label         = res.label,
+                sublabel      = when {
+                    is4KEntry && !is4KSupported -> "Not supported on this device"
+                    is4KEntry -> "Significantly slower; large file (~100 MB/min)"
+                    else -> null
+                },
+                sublabelColor = if (is4KEntry) Color(0xFFFFAA00) else null,
+                onClick       = { if (enabled) onSelect(res) },
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+        Spacer(Modifier.height(8.dp))
+
+        RadioRow(
+            selected = if (is4K) true else selectedFps == 30,
+            label    = "30 fps",
+            sublabel = if (is4K) "4K exports are limited to 30 fps"
+                       else "Recommended for TikTok / Reels / Shorts — smaller file, no re-encoding",
+            sublabelColor = if (is4K) Color(0xFFFFAA00) else null,
+            onClick  = { if (!is4K) onSelectFps(30) },
+        )
+        RadioRow(
+            selected  = !is4K && selectedFps == 60,
+            enabled   = !is4K,
+            label     = "60 fps",
+            sublabel  = "Recommended for YouTube / archival — smoother motion",
+            onClick   = { onSelectFps(60) },
+        )
+
+        // ── Duration ──────────────────────────────────────────────────────────
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+        Spacer(Modifier.height(8.dp))
+
+        if (hasAudio) {
+            if (audioFileDurationMs > 0L) {
+                Text(
+                    "Length: ${formatDuration((audioFileDurationMs / 1000).toInt())} (matches song)",
+                    color    = DimWhite,
+                    fontSize = 14.sp,
+                )
+            }
+        } else {
+            Text("Duration", color = NeonCyan, fontSize = 12.sp, letterSpacing = 1.5.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick  = { onSetNoSongDuration(clampDuration(noSongDurationSec - 1)) },
+                    enabled  = noSongDurationSec > DURATION_MIN_SEC,
+                ) { Text("−", fontSize = 20.sp) }
+                OutlinedTextField(
+                    value         = durationText,
+                    onValueChange = { durationText = it },
+                    singleLine    = true,
+                    textStyle     = TextStyle(
+                        textAlign  = TextAlign.Center,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize   = 18.sp,
+                        color      = Color.White,
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction    = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { commitDuration() }),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { if (!it.isFocused) commitDuration() },
+                )
+                TextButton(
+                    onClick  = { onSetNoSongDuration(clampDuration(noSongDurationSec + 1)) },
+                    enabled  = noSongDurationSec < DURATION_MAX_SEC,
+                ) { Text("+", fontSize = 20.sp) }
+            }
+
+            // Estimate line
+            val effFps   = if (is4K) 30 else selectedFps
+            val estBytes = StorageEstimator.estimateBytes(selected.bitrate, noSongDurationSec.toDouble(), false)
+            val estRender = estimateRenderTimeSec(noSongDurationSec, selected, effFps)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "~${StorageEstimator.formatBytes(estBytes)}  ·  ~${formatRenderTime(estRender)}",
+                color    = DimWhite,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            // Clarity line
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (hasMotionSource)
+                    "No song selected — exporting ${formatDuration(noSongDurationSec)} of visuals (motion active)."
+                else
+                    "No song selected — exporting ${formatDuration(noSongDurationSec)} of visuals. " +
+                        "Heads up: nothing is animating this, so the video will be mostly static. " +
+                        "Turn on Random or Party mode if you want movement.",
+                color    = if (hasMotionSource) DimWhite else Color(0xFFFFAA44),
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        // ── Triple Echo Bloom ─────────────────────────────────────────────────
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = !isCycloneMode) { onSelectTripleEchoBloom(!tripleEchoBloom) }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Triple Echo Bloom",
+                    color      = if (isCycloneMode) DimWhite else Color.White,
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "3 speed-offset taps (100/75/50%) keyed & composited — export only",
+                    color    = DimWhite,
+                    fontSize = 12.sp,
+                )
+                if (isCycloneMode) {
+                    Text(
+                        "Not available for Cyclone mode",
+                        color    = Color(0xFFFFAA44),
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+            Switch(
+                checked         = tripleEchoBloom,
+                onCheckedChange = { if (!isCycloneMode) onSelectTripleEchoBloom(it) },
+                enabled         = !isCycloneMode,
             )
         }
     }
@@ -610,8 +804,13 @@ private fun KaleidoSummaryCard(settings: KaleidoSettings) {
         val partyLine = buildString {
             append("Party: ${if (settings.partyEnabled) "on" else "off"}")
             append(" | Random: ${if (settings.randomEnabled) "on" else "off"}")
+            append(" | Reactive: ${if (settings.reactiveEnabled) "on" else "off"}")
             if (settings.partyEnabled || settings.randomEnabled)
-                append(" | ${(settings.partyIntensity * 100).toInt()}%")
+                append(" | P/R: ${(settings.partyIntensity * 100).toInt()}%")
+            if (settings.reactiveEnabled)
+                append(" | React: ${(settings.reactiveIntensity * 100).toInt()}%")
+            if (settings.paletteMode != PaletteMode.Off)
+                append(" | Palette: ${settings.paletteMode.label} ${(settings.paletteTint * 100).toInt()}%")
         }
         SummaryRow("Auto", partyLine)
         SummaryRow("Beat reactivity", "${(settings.beatReactivity * 100).toInt()}%")
@@ -1012,6 +1211,60 @@ private fun ExportKaleidoOverrideContent(
                 )
                 Text(
                     text       = "${(settings.partyIntensity * 100).toInt()}%",
+                    color      = Color.White,
+                    fontSize   = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier   = Modifier.width(40.dp).padding(start = 6.dp),
+                )
+            }
+        }
+
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(settings.copy(reactiveEnabled = !settings.reactiveEnabled)) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Reactive mode",
+                    color      = Color.White,
+                    fontSize   = 14.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    modifier   = Modifier.weight(1f),
+                )
+                Text(
+                    "Cycles painter on strong musical peaks",
+                    color    = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                )
+            }
+            Switch(
+                checked         = settings.reactiveEnabled,
+                onCheckedChange = { onUpdate(settings.copy(reactiveEnabled = it)) },
+            )
+        }
+
+        if (settings.reactiveEnabled) {
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Intensity",
+                    color    = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(64.dp),
+                )
+                Slider(
+                    value         = settings.reactiveIntensity,
+                    onValueChange = { onUpdate(settings.copy(reactiveIntensity = it)) },
+                    valueRange    = 0f..1f,
+                    modifier      = Modifier.weight(1f),
+                )
+                Text(
+                    text       = "${(settings.reactiveIntensity * 100).toInt()}%",
                     color      = Color.White,
                     fontSize   = 12.sp,
                     fontFamily = FontFamily.Monospace,

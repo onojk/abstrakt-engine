@@ -20,19 +20,24 @@ internal class AudioUniforms {
     @Volatile var activePainter: Painter = Painter.HUE_STRIPE
     // Non-null while mic is active; takes priority over file-based snapshot.
     @Volatile var liveSnapshot: AudioSnapshot? = null
+    // SHAKEDIAG isolation toggle — when true, renderer always sees a frozen silent snapshot
+    // regardless of mic/file state. Toggle via AbstraktGLSurfaceView.setDebugForceSilent().
+    @Volatile var debugForceSilentSnapshot = false
+
+    private val SILENT_SNAP = AudioSnapshot(FloatArray(8), 0f, false)
 
     // Reset to false in onSurfaceCreated so locations are re-logged after context restore.
     internal var uniformsLogged = false
 
-    fun getSnapshot(): AudioSnapshot =
-        liveSnapshot
+    fun getSnapshot(): AudioSnapshot {
+        if (debugForceSilentSnapshot) return SILENT_SNAP
+        return liveSnapshot
             ?: audioFile?.let { snapshotAt(it, playbackFraction) }
-            ?: AudioSnapshot(FloatArray(8), 0f, false)
+            ?: SILENT_SNAP
+    }
 
     fun applyToProgram(program: ShaderProgram, timeSec: Float) {
-        val snap = liveSnapshot
-            ?: audioFile?.let { snapshotAt(it, playbackFraction) }
-            ?: AudioSnapshot(FloatArray(8), 0f, false)
+        val snap = getSnapshot()
 
         if (!uniformsLogged) {
             UNIFORM_NAMES.forEach { name ->

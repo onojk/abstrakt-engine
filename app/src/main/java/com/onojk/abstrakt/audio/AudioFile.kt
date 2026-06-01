@@ -59,6 +59,22 @@ data class AudioFile(
     val rmsEnvelope: FloatArray,           // normalized RMS per ~50ms window [numWindows]
     val smoothedBands: Array<FloatArray>,  // EMA-smoothed 8-band values [numWindows][8], 0..1
     val beatFlags: BooleanArray,           // pre-computed beat per window [numWindows]
+    val beatLow: FloatArray,               // BeatEnvelope level for Low band (60-250 Hz)  [numWindows]
+    val beatMid: FloatArray,               // BeatEnvelope level for Mid band (250-2k Hz)  [numWindows]
+    val beatHigh: FloatArray,              // BeatEnvelope level for High band (2k-16k Hz) [numWindows]
+    val beatBroadband: FloatArray,         // BeatEnvelope level for Broadband             [numWindows]
+    val beatPhase: FloatArray,             // PLL beat phase ∈ [0,1) per window            [numWindows]
+    // bpm is single-valued for the whole song; tracks dominant tempo.
+    // Songs with dramatic tempo changes will lock to whichever period dominates the first 6s.
+    val bpm: Float?,
+    val bpmConfidence: Float,
+    // Key detection — per window; keyRoot uses -1 as sentinel for "not yet locked".
+    val chroma: Array<FloatArray>,         // L2-normalized 12-pitch-class profile [numWindows][12]
+    val chromaPeak: IntArray,              // dominant pitch class 0–11 [numWindows]
+    val keyRoot: IntArray,                 // -1 = not yet locked; 0=C…11=B [numWindows]
+    val keyIsMajor: BooleanArray,          // [numWindows]
+    val keyConfidence: FloatArray,         // Pearson r of best K-S match [numWindows]
+    val keyChanged: BooleanArray,          // true on the window where lockedKey transitions [numWindows]
 )
 
 suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(Dispatchers.IO) {
@@ -89,9 +105,31 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
     val windowSamples    = windowMonoFrames * channelCount   // interleaved PCM16 shorts
     val windowBytes      = windowSamples * 2
 
-    val rmsRaw     = mutableListOf<Float>()
+    val rmsRaw       = mutableListOf<Float>()
     val rawBandsList = mutableListOf<FloatArray>()
-    val fluxList   = mutableListOf<Float>()
+    val fluxList     = mutableListOf<Float>()
+
+    // Per-band onset detection — historySize=43 ≈ 6 s at one 50ms window per entry
+    val beatDets      = createBandDetectors(sampleRate, historySize = 43)
+    val beatLowList   = mutableListOf<Float>()
+    val beatMidList   = mutableListOf<Float>()
+    val beatHighList  = mutableListOf<Float>()
+    val beatBroadList = mutableListOf<Float>()
+    val windowDtSec   = windowMonoFrames.toFloat() / sampleRate
+    var windowTimeSec = 0f
+
+    // Tempo tracker — one entry per ~50ms analysis window.
+    val tempoTracker  = TempoTracker(windowDtSec)
+    val beatPhaseList = mutableListOf<Float>()
+
+    // Key tracker — one entry per ~50ms analysis window.
+    val keyTrackerOffline  = KeyTracker(windowDtSec)
+    val chromaList         = mutableListOf<FloatArray>()
+    val chromaPeakList     = mutableListOf<Int>()
+    val keyRootList        = mutableListOf<Int>()
+    val keyIsMajorList     = mutableListOf<Boolean>()
+    val keyConfidenceList  = mutableListOf<Float>()
+    val keyChangedList     = mutableListOf<Boolean>()
 
     val windowBuf  = ByteArray(windowBytes)
     var windowPos  = 0
@@ -172,6 +210,47 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
                         }
                         fluxList.add(flux)
 
+                        // ── Per-band onset detection ───────────────────────────
+                        // processFlux reads prevSpec before it is updated below.
+                        beatLowList.add(
+                            beatDets[BeatBand.Low.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        beatMidList.add(
+                            beatDets[BeatBand.Mid.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        beatHighList.add(
+                            beatDets[BeatBand.High.ordinal]
+                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        )
+                        val broadbandDet   = beatDets[BeatBand.Broadband.ordinal]
+                        val bbEnvBefore    = broadbandDet.envelope.level
+                        val lvBroadband    = broadbandDet
+                                                .processFlux(spectrum, prevSpec, windowTimeSec, windowDtSec)
+                        beatBroadList.add(lvBroadband)
+
+                        // ── Tempo tracking ────────────────────────────────────
+                        // Snapshot phase BEFORE chunk advance so the stored value
+                        // represents the phase at the START of this window.
+                        beatPhaseList.add(tempoTracker.phase)
+                        tempoTracker.processChunk(broadbandDet.lastFlux)
+                        // 0.2f: empirical — a fresh envelope trigger always jumps by ≥ 0.33.
+                        if (lvBroadband > bbEnvBefore + 0.2f) tempoTracker.onBroadbandOnset()
+
+                        windowTimeSec += windowDtSec
+
+                        // ── Key / pitch detection ─────────────────────────────
+                        val rawChroma   = chromaFromMagnitudes(spectrum, sampleRate)
+                        val keyChanged  = keyTrackerOffline.processChunk(rawChroma)
+                        val lockedKey   = keyTrackerOffline.lockedKey
+                        chromaList.add(keyTrackerOffline.chroma.copyOf())
+                        chromaPeakList.add(keyTrackerOffline.chromaPeak)
+                        keyRootList.add(lockedKey?.first ?: -1)
+                        keyIsMajorList.add(lockedKey?.second ?: true)
+                        keyConfidenceList.add(keyTrackerOffline.confidence)
+                        keyChangedList.add(keyChanged)
+
                         rawBandsList.add(bandEnergies(spectrum, sampleRate))
                         prevSpec  = spectrum
                         windowPos = 0
@@ -236,5 +315,21 @@ suspend fun loadAndAnalyze(context: Context, uri: Uri): AudioFile = withContext(
         }
     }
 
-    AudioFile(uri, durationMs, sampleRate, channelCount, rmsEnvelope, smoothedBands, beatFlags)
+    AudioFile(
+        uri, durationMs, sampleRate, channelCount,
+        rmsEnvelope, smoothedBands, beatFlags,
+        beatLow       = FloatArray(numWindows) { beatLowList[it] },
+        beatMid       = FloatArray(numWindows) { beatMidList[it] },
+        beatHigh      = FloatArray(numWindows) { beatHighList[it] },
+        beatBroadband = FloatArray(numWindows) { beatBroadList[it] },
+        beatPhase     = FloatArray(numWindows) { beatPhaseList[it] },
+        bpm           = tempoTracker.currentBpm,
+        bpmConfidence = tempoTracker.confidence,
+        chroma        = Array(numWindows) { chromaList[it] },
+        chromaPeak    = IntArray(numWindows) { chromaPeakList[it] },
+        keyRoot       = IntArray(numWindows) { keyRootList[it] },
+        keyIsMajor    = BooleanArray(numWindows) { keyIsMajorList[it] },
+        keyConfidence = FloatArray(numWindows) { keyConfidenceList[it] },
+        keyChanged    = BooleanArray(numWindows) { keyChangedList[it] },
+    )
 }

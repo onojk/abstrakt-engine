@@ -3,6 +3,7 @@ package com.onojk.abstrakt
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.onojk.abstrakt.color.ColorHarmony
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -87,6 +88,14 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch { store.setPartyIntensity(value) }
     }
 
+    fun setReactiveEnabled(value: Boolean) {
+        viewModelScope.launch { store.setReactiveEnabled(value) }
+    }
+
+    fun setReactiveIntensity(value: Float) {
+        viewModelScope.launch { store.setReactiveIntensity(value) }
+    }
+
     fun setBassZoomIntensity(value: Float) {
         viewModelScope.launch { store.setBassZoomIntensity(value) }
     }
@@ -121,6 +130,101 @@ class KaleidoSettingsViewModel(application: Application) : AndroidViewModel(appl
 
     fun setBeatReactivity(value: Float) {
         viewModelScope.launch { store.setBeatReactivity(value) }
+    }
+
+    fun setPitchToHue(value: Boolean) {
+        viewModelScope.launch { store.setPitchToHue(value) }
+    }
+
+    fun setKeyChangePartyTrigger(value: Boolean) {
+        viewModelScope.launch { store.setKeyChangePartyTrigger(value) }
+    }
+
+    fun setBpmRotationLock(value: Boolean) {
+        viewModelScope.launch { store.setBpmRotationLock(value) }
+    }
+
+    fun setBeatsPerRevolution(value: Int) {
+        viewModelScope.launch { store.setBeatsPerRevolution(value) }
+    }
+
+    fun setChromaAberrationEnabled(value: Boolean) {
+        viewModelScope.launch { store.setChromaAberrationEnabled(value) }
+    }
+
+    fun setChromaAberrationIntensity(value: Float) {
+        viewModelScope.launch { store.setChromaAberrationIntensity(value) }
+    }
+
+    fun setChromaAberrationAudioReact(value: Boolean) {
+        viewModelScope.launch { store.setChromaAberrationAudioReact(value) }
+    }
+
+    fun setPaletteMode(value: PaletteMode) {
+        viewModelScope.launch { store.setPaletteMode(value) }
+    }
+
+    fun setPaletteTint(value: Float) {
+        viewModelScope.launch { store.setPaletteTint(value) }
+    }
+
+    fun setPaletteMonoHue(value: Float) {
+        viewModelScope.launch { store.setPaletteMonoHue(value) }
+    }
+
+    fun setBlackholeEnabled(value: Boolean) {
+        viewModelScope.launch { store.setBlackholeEnabled(value) }
+    }
+
+    fun setBlackholeStrength(value: Float) {
+        viewModelScope.launch { store.setBlackholeStrength(value) }
+    }
+
+    fun setBlackholeShrinkRate(value: Float) {
+        viewModelScope.launch { store.setBlackholeShrinkRate(value) }
+    }
+
+    fun setBlackholeAlphaRadius(value: Float) {
+        viewModelScope.launch { store.setBlackholeAlphaRadius(value) }
+    }
+
+    fun setBlackholeWanderAmount(value: Float) {
+        viewModelScope.launch { store.setBlackholeWanderAmount(value) }
+    }
+
+    fun setHarmonyType(value: ColorHarmony) {
+        viewModelScope.launch { store.setHarmonyType(value) }
+    }
+
+    fun setHarmonyAnchorHue(value: Float) {
+        viewModelScope.launch { store.setHarmonyAnchorHue(value) }
+    }
+
+    fun setHarmonySaturation(value: Float) {
+        viewModelScope.launch { store.setHarmonySaturation(value) }
+    }
+
+    fun setHarmonyValue(value: Float) {
+        viewModelScope.launch { store.setHarmonyValue(value) }
+    }
+
+    fun setHarmonyStrength(value: Float) {
+        viewModelScope.launch { store.setHarmonyStrength(value) }
+    }
+
+    fun setLutSelection(value: String) { viewModelScope.launch { store.setLutSelection(value) } }
+    fun setLutStrength(value: Float)   { viewModelScope.launch { store.setLutStrength(value) } }
+
+    fun setSuddenWarpEnabled(value: Boolean) {
+        viewModelScope.launch { store.setSuddenWarpEnabled(value) }
+    }
+
+    fun setLightningEnabled(value: Boolean) {
+        viewModelScope.launch { store.setLightningEnabled(value) }
+    }
+
+    fun setLightningSpritesLimit5s(value: Boolean) {
+        viewModelScope.launch { store.setLightningSpritesLimit5s(value) }
     }
 
     fun toggleLock(param: LockableParam) {

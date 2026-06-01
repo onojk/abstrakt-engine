@@ -19,6 +19,11 @@ data class ExportConfig(
     val partyEnabled: Boolean = false,
     val randomEnabled: Boolean = false,
     val partyIntensity: Float = 0.5f,
+    val reactiveEnabled: Boolean = false,
+    val reactiveIntensity: Float = 0.5f,
+    val paletteMode: PaletteMode = PaletteMode.Off,
+    val paletteTint: Float = 1.0f,
+    val paletteMonoHue: Float = 200.0f,
     val contrast: Float = 1.0f,
     val contrastPasses: Int = 1,
     val saturation: Float = 1.0f,
@@ -36,7 +41,8 @@ sealed class AudioSource {
 }
 
 enum class ExportResolution(val width: Int, val height: Int, val label: String, val bitrate: Int) {
-    HD_720P  (1280, 720,  "720p — small file, fast export",             8_000_000),
+    SD_480P  ( 854,  480, "480p — smallest file, fastest export",       4_000_000),
+    HD_720P  (1280,  720, "720p — small file, fast export",             8_000_000),
     FHD_1080P(1920, 1080, "1080p — recommended",                       16_000_000),
     UHD_4K   (3840, 2160, "4K — large file, slow export",              80_000_000),
 }

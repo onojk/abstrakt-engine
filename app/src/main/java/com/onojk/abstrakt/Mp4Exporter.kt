@@ -10,6 +10,7 @@ import android.net.Uri
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLExt
+import android.opengl.GLES30
 import android.util.Log
 import android.view.Surface
 import com.onojk.abstrakt.audio.AudioFile
@@ -17,6 +18,8 @@ import com.onojk.abstrakt.audio.AudioSnapshot
 import com.onojk.abstrakt.audio.analyzeOffline
 import com.onojk.abstrakt.gl.AbstraktRenderer
 import com.onojk.abstrakt.gl.GlVizMode
+import com.onojk.abstrakt.gl.ShaderProgram
+import com.onojk.abstrakt.gl.Shaders
 import com.onojk.abstrakt.gl.shapeFor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -56,6 +59,11 @@ class Mp4Exporter(
     private val partyEnabled: Boolean = false,
     private val randomEnabled: Boolean = false,
     private val partyIntensity: Float = 0.5f,
+    private val reactiveEnabled: Boolean = false,
+    private val reactiveIntensity: Float = 0.5f,
+    private val paletteMode: PaletteMode = PaletteMode.Off,
+    private val paletteTint: Float = 1.0f,
+    private val paletteMonoHue: Float = 200.0f,
     private val bassZoomIntensity: Float = 0.5f,
     private val contrast: Float = 1.0f,
     private val contrastPasses: Int = 1,
@@ -66,6 +74,7 @@ class Mp4Exporter(
     private val distortionPlusRoll: Float = 0f,
     private val lockedParams: Set<LockableParam> = emptySet(),
     private val beatReactivity: Float = 0.25f,
+    private val tripleEchoBloom: Boolean = false,
 ) {
     companion object {
         private const val TAG = "Mp4Exporter"
@@ -88,6 +97,13 @@ class Mp4Exporter(
 
     private val renderer = AbstraktRenderer(context)
     private var audioExtractor: MediaExtractor? = null
+
+    // ── Triple Echo Bloom — offscreen tap FBOs + composite resources ──────────
+    private var tapFboA = 0; private var tapTexA = 0
+    private var tapFboB = 0; private var tapTexB = 0
+    private var tapFboC = 0; private var tapTexC = 0
+    private var echoVao = 0; private var echoVbo = 0
+    private var echoBloomProgram: ShaderProgram? = null
 
     // Re-encode path — nullable; only allocated when audioPath != DIRECT_COPY
     private var audioDecoder: MediaCodec? = null
@@ -208,13 +224,22 @@ class Mp4Exporter(
         renderer.contrast             = contrast
         renderer.contrastPasses       = contrastPasses
         renderer.saturation           = saturation
+        renderer.paletteMode          = paletteMode
+        renderer.paletteTint          = paletteTint
+        renderer.paletteMonoHue       = paletteMonoHue
 
-        val exportPartyEngine  = PartyEngine  { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
+        val exportPartyEngine  = PartyEngine(
+            applyChange = { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) },
+            onWarp      = { renderer.triggerSuddenWarp() },
+        )
         exportPartyEngine.enabled   = partyEnabled
         exportPartyEngine.intensity = partyIntensity
         val exportRandomEngine = RandomEngine { r -> applyRandomChangeToRenderer(renderer, lockedParams, r) }
         exportRandomEngine.enabled   = randomEnabled
         exportRandomEngine.intensity = partyIntensity
+        val exportReactiveEngine = ReactiveEngine { renderer.cyclePainter() }
+        exportReactiveEngine.enabled   = reactiveEnabled
+        exportReactiveEngine.intensity = reactiveIntensity
 
         muxer = if (outputFd != null) {
             MediaMuxer(outputFd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -267,6 +292,16 @@ class Mp4Exporter(
         }
         onProgress(0f, "Encoding video…")
 
+        // Triple Echo Bloom is disabled for Cyclone (painter-FBO accumulation incompatibility).
+        val useEchoBloom = tripleEchoBloom && exportMode != Mode.Cyclone
+        if (useEchoBloom) allocateEchoBloomResources(width, height)
+
+        // Helper: snapshot lookup clamped to valid range; returns silentSnap if analysis missing.
+        val snapAt: (Float) -> AudioSnapshot = { floatIdx ->
+            if (!beatResponseEnabled || analyzedSnapshots == null) silentSnap
+            else analyzedSnapshots.getOrNull(floatIdx.toInt().coerceIn(0, totalFrames - 1)) ?: silentSnap
+        }
+
         try {
             for (frameIndex in 0 until totalFrames) {
                 currentCoroutineContext().ensureActive()
@@ -276,18 +311,29 @@ class Mp4Exporter(
 
                 val snap = if (beatResponseEnabled) analyzedSnapshots?.getOrNull(frameIndex) ?: silentSnap
                            else silentSnap
-                renderer.renderFrame(
-                    surfaceWidth  = width,
-                    surfaceHeight = height,
-                    timeSec       = timeSec,
-                    dt            = dt,
-                    audioSnapshot = snap,
-                    mode          = exportMode,
-                )
+
+                if (useEchoBloom) {
+                    val fA = frameIndex.toFloat()
+                    renderer.renderFrame(width, height, timeSec,          dt, snap,                exportMode, tapFboA, absoluteTimeSec = timeSec)
+                    renderer.renderFrame(width, height, timeSec * 0.66f,  dt, snapAt(fA * 0.66f), exportMode, tapFboB, absoluteTimeSec = timeSec * 0.66f)
+                    renderer.renderFrame(width, height, timeSec * 0.33f,  dt, snapAt(fA * 0.33f), exportMode, tapFboC, absoluteTimeSec = timeSec * 0.33f)
+                    drawEchoBloomComposite(width, height)
+                } else {
+                    renderer.renderFrame(
+                        surfaceWidth  = width,
+                        surfaceHeight = height,
+                        timeSec       = timeSec,
+                        dt            = dt,
+                        audioSnapshot = snap,
+                        mode          = exportMode,
+                    )
+                }
 
                 if (snap.isBeat) exportPartyEngine.onBeat()
                 exportRandomEngine.tickWithVideoTime(presentationTimeUs / 1000L)
+                exportReactiveEngine.onSnapshot(snap, nowMs = presentationTimeUs / 1000L)
 
+                GLES30.glFinish()
                 EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeUs * 1000L)
                 EGL14.eglSwapBuffers(eglDisplay, eglSurface)
                 drainEncoder(endOfStream = false)
@@ -308,6 +354,7 @@ class Mp4Exporter(
 
             Log.d(TAG, "Encode complete: ${outputFile?.length() ?: "(fd)"}")
         } finally {
+            if (useEchoBloom) releaseEchoBloomResources()
             audioExtractor?.release()
             audioExtractor = null
             runCatching { audioDecoder?.stop() }
@@ -324,6 +371,79 @@ class Mp4Exporter(
             muxer.release()
             inputSurface.release()
         }
+    }
+
+    // ── Triple Echo Bloom resources ───────────────────────────────────────────
+
+    private fun allocateEchoBloomResources(w: Int, h: Int) {
+        val texIds = IntArray(3); val fboIds = IntArray(3)
+        GLES30.glGenTextures(3, texIds, 0)
+        GLES30.glGenFramebuffers(3, fboIds, 0)
+        for (i in 0..2) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texIds[i])
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8,
+                w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fboIds[i])
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D, texIds[i], 0)
+            val st = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+            Log.d(TAG, "EchoTapFBO[$i] ${if (st == GLES30.GL_FRAMEBUFFER_COMPLETE) "COMPLETE" else "INCOMPLETE $st"}")
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        }
+        tapTexA = texIds[0]; tapFboA = fboIds[0]
+        tapTexB = texIds[1]; tapFboB = fboIds[1]
+        tapTexC = texIds[2]; tapFboC = fboIds[2]
+
+        echoBloomProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.ECHO_BLOOM_COMPOSITE_FRAG)
+
+        val vaoArr = IntArray(1); val vboArr = IntArray(1)
+        GLES30.glGenVertexArrays(1, vaoArr, 0)
+        GLES30.glGenBuffers(1, vboArr, 0)
+        echoVao = vaoArr[0]; echoVbo = vboArr[0]
+        val quadVerts = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+        val buf = java.nio.ByteBuffer.allocateDirect(quadVerts.size * 4)
+            .order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer()
+        buf.put(quadVerts).flip()
+        GLES30.glBindVertexArray(echoVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, echoVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quadVerts.size * 4, buf, GLES30.GL_STATIC_DRAW)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glBindVertexArray(0)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
+        Log.d(TAG, "EchoBloom resources allocated: ${w}x${h}")
+    }
+
+    private fun releaseEchoBloomResources() {
+        if (tapFboA != 0) GLES30.glDeleteFramebuffers(3, intArrayOf(tapFboA, tapFboB, tapFboC), 0)
+        if (tapTexA != 0) GLES30.glDeleteTextures(3, intArrayOf(tapTexA, tapTexB, tapTexC), 0)
+        if (echoVao  != 0) GLES30.glDeleteVertexArrays(1, intArrayOf(echoVao), 0)
+        if (echoVbo  != 0) GLES30.glDeleteBuffers(1, intArrayOf(echoVbo), 0)
+        echoBloomProgram?.delete()
+        tapFboA = 0; tapTexA = 0; tapFboB = 0; tapTexB = 0; tapFboC = 0; tapTexC = 0
+        echoVao = 0; echoVbo = 0; echoBloomProgram = null
+    }
+
+    private fun drawEchoBloomComposite(w: Int, h: Int) {
+        val prog = echoBloomProgram ?: return
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(0, 0, w, h)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        prog.use()
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tapTexA); prog.setInt("u_tapA", 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tapTexB); prog.setInt("u_tapB", 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tapTexC); prog.setInt("u_tapC", 2)
+        GLES30.glBindVertexArray(echoVao)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        GLES30.glBindVertexArray(0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0); GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
     }
 
     // ── Audio path selection ──────────────────────────────────────────────────
@@ -587,7 +707,7 @@ class Mp4Exporter(
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
             EGL14.EGL_ALPHA_SIZE, 8,
-            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT or 0x40, // ES3_BIT_KHR
             EGL_RECORDABLE_ANDROID, 1,
             EGL14.EGL_NONE,
         )

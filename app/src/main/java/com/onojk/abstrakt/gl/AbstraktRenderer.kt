@@ -12,9 +12,13 @@ import android.os.SystemClock
 import android.util.Log
 import com.onojk.abstrakt.FrameShape
 import com.onojk.abstrakt.Mode
+import com.onojk.abstrakt.PaletteMode
 import com.onojk.abstrakt.ShapeKind
+import com.onojk.abstrakt.color.ColorHarmony
+import com.onojk.abstrakt.color.wrapHue
 import com.onojk.abstrakt.audio.AudioFile
 import com.onojk.abstrakt.audio.AudioSnapshot
+import com.onojk.abstrakt.skin.CubeLut
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import javax.microedition.khronos.egl.EGLConfig
@@ -37,6 +41,9 @@ private const val WARP_DOT_RADIUS    =  6f
 private const val PAINTER_TEX_W      = 4096
 private const val PAINTER_TEX_H      = 256
 private const val PAINTER_STRIPE_W   = 16
+// Noise-floor gate for beatDecay: snap.peak below this is ambient noise (mic USB/AC hum peaks
+// at 0.003–0.012); real audio consistently above 0.030. Prevents shake in silent rooms.
+private const val RENDERER_BEAT_PEAK_FLOOR = 0.020f
 
 internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
@@ -81,6 +88,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private val collapsePhase   = FloatArray(4) { 0f }
     private val collapseTimer   = FloatArray(4) { 0f }
     private var beatDecay       = 0f
+    // EMA-smoothed dt used ONLY for rotation accumulation — keeps rotation smooth
+    // despite OS compositor jitter (observed spans up to 13ms at 120Hz).
+    // Real dt is still used for audio-reactive decay (beatDecay, smoothedBass, collapse).
+    private var rotDt = 1f / 120f
     // Per-mode skin textures (indices 0-4 = skin1..skin5).
     private val skinTextures    = IntArray(5)
     // Per-mode parameters — written from UI thread, read on GL thread.
@@ -100,6 +111,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var distortionPlusFboW = 0
     private var distortionPlusFboH = 0
     private var distortionPlusProgram: ShaderProgram? = null
+    private var chromaAberrationFbo  = 0
+    private var chromaAberrationTex  = 0
+    private var chromaAberrationFboW = 0
+    private var chromaAberrationFboH = 0
+    private var chromaAberrationProgram: ShaderProgram? = null
     private var shapeFbo         = 0
     private var shapeColorTex    = 0
     private var shapeDepthBuffer = 0
@@ -118,10 +134,60 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     @Volatile var distortionEnabled    = false
     @Volatile var distortionAmplitude  = 0.3f      // 0..1
     @Volatile var distortionFrequency  = 2.0f      // 0.5..8.0
+    @Volatile var suddenWarpEnabled    = false
+    @Volatile var warpAmplitude        = 0.18f
+    private var warpStartSec           = -1f
+    private var warpDurationSec        = 0f
+    private var warpSeed               = 0f
+    private val warpRandom             = java.util.Random()
     @Volatile var distortionPlusEnabled = false
     @Volatile var distortionPlusYaw     = 0f       // -180..180 degrees
     @Volatile var distortionPlusPitch   = 0f       // -90..90 degrees
     @Volatile var distortionPlusRoll    = 0f       // -180..180 degrees
+    @Volatile var chromaAberrationEnabled  = false
+    @Volatile var chromaAberrationIntensity = 0.008f  // 0..0.02 UV offset per channel
+    @Volatile var chromaAberrationAudioReact = false
+    private var blackholeFboA = 0; private var blackholeTexA = 0
+    private var blackholeFboB = 0; private var blackholeTexB = 0
+    private var blackholeFboW     = 0
+    private var blackholeFboH     = 0
+    private var blackholeReadIsA  = true
+    private var blackholeWasEnabled = false
+    private var blackholeProgram: ShaderProgram? = null
+    @Volatile var blackholeEnabled     = false
+    @Volatile var blackholeStrength    = 0.5f   // feedback blend weight 0..0.98
+    @Volatile var blackholeShrinkRate  = 0.97f  // per-frame UV scale 0.90..0.999
+    @Volatile var blackholeAlphaRadius = 0.5f   // edge-blend start 0.1..0.9
+    @Volatile var blackholeWanderAmount = 0.005f // vanishing-point drift 0..0.02
+    private var lightningProgram: ShaderProgram? = null
+    private var lightningCompositeProgram: ShaderProgram? = null
+    @Volatile var lightningEnabled          = false
+    @Volatile var lightningSpritesLimit5s   = true
+    @Volatile var lightningTouching    = false
+    @Volatile var lightningTouchX      = 0f
+    @Volatile var lightningTouchY      = 0f
+    private var lightningFbo           = 0
+    private var lightningTex           = 0
+    private var lightningFboW          = 0
+    private var lightningFboH          = 0
+    private var boltLowFbo             = 0
+    private var boltLowTex             = 0
+    private var boltLowFboW            = 0
+    private var boltLowFboH            = 0
+    private val lightningSystem = LightningSystem()
+    @Volatile var paletteMode    = PaletteMode.Off
+    @Volatile var paletteTint    = 1.0f
+    @Volatile var paletteMonoHue = 200.0f
+    @Volatile var harmonyType: ColorHarmony = ColorHarmony.Triadic
+    @Volatile var harmonyAnchorHue: Float   = 0f
+    @Volatile var harmonySaturation: Float  = 0.8f
+    @Volatile var harmonyValue: Float       = 0.8f
+    @Volatile var harmonyStrength: Float    = 0.6f
+    @Volatile var lutEnabled  = false
+    @Volatile var lutStrength = 1.0f
+    private var currentLutData: CubeLut? = null
+    private var lutTextureId  = 0
+    private var lutDiagPending = false
     @Volatile var beatThreshold  = 0.4f
     @Volatile var skinIndex      = 0
     val ribbonColor              = FloatArray(3) { 0f }   // rgb; default black
@@ -138,6 +204,15 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
     private var lastFrameLogMs  = 0L
     private var lastTimeLogMs   = 0L
     @Volatile var dumpPainterStatsOnNextFrame = false
+    // SHAKEDIAG — dt jitter tracking over 5-second windows
+    private var dtMin = Float.MAX_VALUE
+    private var dtMax = 0f
+    private var dtLogMs = 0L
+
+    // BPM rotation lock: null = use shape's natural speed; non-null = EMA target in rad/s.
+    @Volatile var rotationSpeedTarget: Float? = null
+    private var smoothedRotSpeed    = 0f
+    private var rotSpeedInitialized = false
 
     private val _currentShapeName = MutableStateFlow("Cylinder")
     val currentShapeName: StateFlow<String> = _currentShapeName.asStateFlow()
@@ -146,6 +221,12 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         currentShape = shapeFor(kind)
         _currentShapeName.value = currentShape.name
         Log.d(TAG, "setShapeKind → ${currentShape.name}")
+    }
+
+    fun cyclePainter() {
+        val all     = Painter.entries
+        val current = audioUniforms.activePainter
+        audioUniforms.activePainter = all[(current.ordinal + 1) % all.size]
     }
     // Mode-change stamp: track which mode was last fully stamped into painterFBO.
     @Volatile var currentMode: Mode = Mode.Cyclone
@@ -189,6 +270,15 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         shapeFbo = 0; shapeColorTex = 0; shapeDepthBuffer = 0; shapeFboW = 0; shapeFboH = 0
         distortionPlusFbo = 0; distortionPlusTex = 0; distortionPlusFboW = 0; distortionPlusFboH = 0
         distortionPlusProgram = null
+        chromaAberrationFbo = 0; chromaAberrationTex = 0; chromaAberrationFboW = 0; chromaAberrationFboH = 0
+        chromaAberrationProgram = null
+        blackholeFboA = 0; blackholeTexA = 0; blackholeFboB = 0; blackholeTexB = 0
+        blackholeFboW = 0; blackholeFboH = 0; blackholeReadIsA = true; blackholeWasEnabled = false
+        blackholeProgram = null
+        lightningProgram = null; lightningCompositeProgram = null
+        lightningFbo = 0; lightningTex = 0; lightningFboW = 0; lightningFboH = 0
+        boltLowFbo = 0; boltLowTex = 0; boltLowFboW = 0; boltLowFboH = 0
+        lightningSystem.reset()
         ribbonReadIsA    = true
         collapseState.fill(0f)
         collapsePhase.fill(0f)
@@ -201,10 +291,13 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         lastFrameNs     = 0L
         frameCount      = 0
         lastFrameLogMs  = 0L
+        dtMin = Float.MAX_VALUE; dtMax = 0f; dtLogMs = 0L
+        rotDt = 1f / 120f
         lastTimeLogMs   = 0L
         lastStampedMode   = null   // force re-stamp after context loss
         allResourcesReady = false
         audioUniforms.uniformsLogged = false
+        lutTextureId = 0  // reset on context loss; re-uploaded when needed
 
         GLES30.glClearColor(0f, 0f, 0f, 1f)
 
@@ -221,6 +314,10 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         blitProgram            = ShaderProgram(Shaders.TEST_VERT, Shaders.BLIT_FRAG)
         frameOverlayProgram    = ShaderProgram(Shaders.TEST_VERT, Shaders.FRAME_OVERLAY_FRAG)
         distortionPlusProgram  = ShaderProgram(Shaders.TEST_VERT, Shaders.DISTORTION_PLUS_FRAG)
+        chromaAberrationProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.CHROMA_ABERRATION_FRAG)
+        blackholeProgram        = ShaderProgram(Shaders.TEST_VERT, Shaders.BLACKHOLE_FRAG)
+        lightningProgram          = ShaderProgram(Shaders.TEST_VERT, Shaders.LIGHTNING_BOLT_FRAG)
+        lightningCompositeProgram = ShaderProgram(Shaders.TEST_VERT, Shaders.LIGHTNING_COMPOSITE_FRAG)
 
         // ── Fullscreen quad VAO/VBO (shared by 2D modes) ─────────────────────
         val vaos = IntArray(1)
@@ -443,6 +540,131 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         distortionPlusFboW = 0; distortionPlusFboH = 0
     }
 
+    private fun createChromaAberrationFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        chromaAberrationTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, chromaAberrationTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        chromaAberrationFbo = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, chromaAberrationFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, chromaAberrationTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        chromaAberrationFboW = w
+        chromaAberrationFboH = h
+        Log.d(TAG, "chromaAberrationFBO: ${w}x${h} fbo=$chromaAberrationFbo tex=$chromaAberrationTex")
+    }
+
+    private fun destroyChromaAberrationFBO() {
+        if (chromaAberrationTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(chromaAberrationTex), 0); chromaAberrationTex = 0 }
+        if (chromaAberrationFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(chromaAberrationFbo), 0); chromaAberrationFbo = 0 }
+        chromaAberrationFboW = 0; chromaAberrationFboH = 0
+    }
+
+    private fun createBlackholeFeedbackFBOs(w: Int, h: Int) {
+        val texIds = IntArray(2)
+        GLES30.glGenTextures(2, texIds, 0)
+        blackholeTexA = texIds[0]; blackholeTexB = texIds[1]
+        for (tex in texIds) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        }
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(2)
+        GLES30.glGenFramebuffers(2, fboIds, 0)
+        blackholeFboA = fboIds[0]; blackholeFboB = fboIds[1]
+        for ((fbo, tex) in listOf(Pair(blackholeFboA, blackholeTexA), Pair(blackholeFboB, blackholeTexB))) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D, tex, 0)
+            GLES30.glClearColor(0f, 0f, 0f, 1f)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        blackholeFboW = w; blackholeFboH = h
+        Log.d(TAG, "blackholeFeedbackFBOs: ${w}x${h} A=$blackholeFboA B=$blackholeFboB")
+    }
+
+    private fun destroyBlackholeFeedbackFBOs() {
+        if (blackholeTexA != 0) { GLES30.glDeleteTextures(1, intArrayOf(blackholeTexA), 0); blackholeTexA = 0 }
+        if (blackholeTexB != 0) { GLES30.glDeleteTextures(1, intArrayOf(blackholeTexB), 0); blackholeTexB = 0 }
+        if (blackholeFboA != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(blackholeFboA), 0); blackholeFboA = 0 }
+        if (blackholeFboB != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(blackholeFboB), 0); blackholeFboB = 0 }
+        blackholeFboW = 0; blackholeFboH = 0
+    }
+
+    private fun createLightningFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        lightningTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, lightningTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        lightningFbo = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, lightningFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, lightningTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        lightningFboW = w; lightningFboH = h
+        Log.d(TAG, "lightningFBO: ${w}x${h} fbo=$lightningFbo tex=$lightningTex")
+    }
+
+    private fun destroyLightningFBO() {
+        if (lightningTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(lightningTex), 0); lightningTex = 0 }
+        if (lightningFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(lightningFbo), 0); lightningFbo = 0 }
+        lightningFboW = 0; lightningFboH = 0
+    }
+
+    private fun createBoltLowFBO(w: Int, h: Int) {
+        val texIds = IntArray(1)
+        GLES30.glGenTextures(1, texIds, 0)
+        boltLowTex = texIds[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, boltLowTex)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        val fboIds = IntArray(1)
+        GLES30.glGenFramebuffers(1, fboIds, 0)
+        boltLowFbo = fboIds[0]
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, boltLowFbo)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, boltLowTex, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        boltLowFboW = w; boltLowFboH = h
+        Log.d(TAG, "boltLowFBO: ${w}x${h} fbo=$boltLowFbo tex=$boltLowTex")
+    }
+
+    private fun destroyBoltLowFBO() {
+        if (boltLowTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(boltLowTex), 0); boltLowTex = 0 }
+        if (boltLowFbo != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(boltLowFbo), 0); boltLowFbo = 0 }
+        boltLowFboW = 0; boltLowFboH = 0
+    }
+
     private fun createShapeFBO(w: Int, h: Int) {
         val tex = IntArray(1)
         GLES30.glGenTextures(1, tex, 0)
@@ -554,6 +776,19 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             Log.d(TAG, "u_time: raw=${"%.1f".format(elapsedSec)}s  wrapped=${"%.3f".format(timeSec)}s")
             lastTimeLogMs = fpsNow
         }
+        // SHAKEDIAG — dt jitter (frame-time instability → accumulated-angle jitter)
+        if (dtLogMs == 0L) dtLogMs = fpsNow
+        if (dtMin == Float.MAX_VALUE) { dtMin = dt; dtMax = dt }
+        else { if (dt < dtMin) dtMin = dt; if (dt > dtMax) dtMax = dt }
+        if (fpsNow - dtLogMs >= 5000) {
+            val liveAudio = audioUniforms.liveSnapshot != null
+            val forceOn   = audioUniforms.debugForceSilentSnapshot
+            Log.d("SHAKEDIAG", "dt 5s: min=${"%.1f".format(dtMin*1000)}ms " +
+                "max=${"%.1f".format(dtMax*1000)}ms " +
+                "span=${"%.1f".format((dtMax-dtMin)*1000)}ms " +
+                "liveAudio=$liveAudio forceSilent=$forceOn")
+            dtMin = Float.MAX_VALUE; dtMax = 0f; dtLogMs = fpsNow
+        }
         if (dumpPainterStatsOnNextFrame) {
             dumpPainterStatsOnNextFrame = false
             debugPainterStats()
@@ -589,7 +824,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
                 val prog = driftProgram ?: return
                 val snap = audioUniforms.getSnapshot()
-                beatDecay = if (snap.isBeat) 1.0f
+                val hasRealSignalDrift = snap.peak > RENDERER_BEAT_PEAK_FLOOR
+                beatDecay = if (snap.isBeat && hasRealSignalDrift) 1.0f
                             else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
                                 .coerceAtLeast(0f)
                 val scaledBeatDecayDrift = beatDecay * beatReactivity
@@ -625,6 +861,8 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         dt: Float,
         audioSnapshot: AudioSnapshot?,
         mode: Mode,
+        outputFbo: Int = 0,
+        absoluteTimeSec: Float = Float.NaN,
     ) {
         val wW   = surfaceWidth.toFloat()
         val wH   = surfaceHeight.toFloat()
@@ -634,16 +872,19 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         if (mode != lastStampedMode) {
             if (mode is Mode.Builtin || mode is Mode.UserSlot) {
                 if (stampFullSkinIntoPainterFbo(mode)) lastStampedMode = mode
+            } else if (mode == Mode.Cyclone && stampFullImageIntoPainterFbo()) {
+                lastStampedMode = mode
             } else {
                 clearPainterFbo()
                 lastStampedMode = mode
             }
         }
 
-        beatDecay = if (snap.isBeat) 1.0f
+        val hasRealSignal = snap.peak > RENDERER_BEAT_PEAK_FLOOR
+        beatDecay = if (snap.isBeat && hasRealSignal) 1.0f
                     else (beatDecay * Math.exp((-dt * 5.0).toDouble()).toFloat())
                         .coerceAtLeast(0f)
-        if (snap.isBeat) Log.d(TAG, "BEAT! peak=${snap.peak} beatDecay=$beatDecay")
+        if (snap.isBeat && hasRealSignal) Log.d(TAG, "BEAT! peak=${snap.peak} beatDecay=$beatDecay")
         val scaledBeatDecay = beatDecay * beatReactivity
 
         val cProg = cycloneProgram ?: return
@@ -653,9 +894,19 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
 
         // Advance rotation. Keep angles in [0, 2π) so mediump shaders never see
         // large values where float ULP exceeds one frame's increment.
-        val twoPi = (2.0 * Math.PI).toFloat()
-        shapeAngleRad      = (shapeAngleRad + dt * currentShape.rotationSpeedRadPerSec()).rem(twoPi)
-        kaleidoRotationRad = (kaleidoRotationRad + dt * 0.05f).rem(twoPi)
+        val twoPi        = (2.0 * Math.PI).toFloat()
+        val naturalSpeed = currentShape.rotationSpeedRadPerSec()
+        if (!rotSpeedInitialized) { smoothedRotSpeed = naturalSpeed; rotSpeedInitialized = true }
+        val target       = rotationSpeedTarget ?: naturalSpeed
+        smoothedRotSpeed = smoothedRotSpeed * 0.95f + target * 0.05f
+        if (absoluteTimeSec.isNaN()) {
+            rotDt              = rotDt * 0.95f + dt * 0.05f  // filter OS jitter; τ ≈ 20 frames
+            shapeAngleRad      = (shapeAngleRad + rotDt * smoothedRotSpeed).rem(twoPi)
+            kaleidoRotationRad = (kaleidoRotationRad + rotDt * 0.05f).rem(twoPi)
+        } else {
+            shapeAngleRad      = (absoluteTimeSec * smoothedRotSpeed).rem(twoPi)
+            kaleidoRotationRad = (absoluteTimeSec * 0.05f).rem(twoPi)
+        }
 
         // Shake values hoisted here so Pass 3 (kaleido) can reuse the same frame values.
         val shakeAmp = beatDecay * 0.35f * beatReactivity
@@ -732,6 +983,9 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         pProg.use()
+
+        val activePainter = audioUniforms.activePainter
+
         // Full painter contract — unused uniforms are optimized out (loc=-1, no-op).
         pProg.setFloat("u_time", timeSec)
         pProg.setFloat("u_peak", snap.peak)
@@ -837,8 +1091,21 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         Matrix.multiplyMM(vpM,  0, projM, 0, viewM,  0)
         Matrix.multiplyMM(mvpM, 0, vpM,   0, modelM, 0)
 
+        // Re-upload LUT on context loss recovery (must happen on GL thread)
+        if (lutEnabled && currentLutData != null && lutTextureId == 0) {
+            uploadLutTexture(currentLutData!!)
+        }
+        val lutApplies = lutEnabled && lutTextureId != 0 &&
+            (activePainter == Painter.SKIN || activePainter == Painter.IMAGE)
+
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, painterTexture)
+
+        // LUT 3D texture on unit 1 — applied in CYCLONE_FRAG after all palette ops
+        if (lutApplies) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
+        }
 
         cProg.use()
         cProg.setMat4("u_mvp", mvpM)
@@ -849,9 +1116,44 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         cProg.setInt("u_distortion_enabled",  if (distortionEnabled)  1 else 0)
         cProg.setFloat("u_distortion_amplitude", distortionAmplitude)
         cProg.setFloat("u_distortion_frequency", distortionFrequency)
+        if (warpStartSec <= -2f) warpStartSec = timeSec
+        if (warpStartSec >= 0f && timeSec < warpStartSec) warpStartSec = timeSec
+        val warpProgress = if (warpStartSec >= 0f && warpDurationSec > 0f)
+            ((timeSec - warpStartSec) / warpDurationSec) else -1f
+        cProg.setFloat("u_warp_progress",   warpProgress)
+        cProg.setFloat("u_warp_amplitude",  warpAmplitude)
+        cProg.setFloat("u_warp_seed",       warpSeed)
+        if (warpProgress > 1f) warpStartSec = -1f
         cProg.setFloat("u_contrast",          contrast)
         cProg.setInt("u_contrast_passes",     contrastPasses)
         cProg.setFloat("u_saturation",        saturation)
+        cProg.setInt("u_palette_mode",       paletteMode.ordinal)
+        cProg.setFloat("u_palette_tint",     paletteTint)
+        cProg.setFloat("u_palette_mono_hue", paletteMonoHue)
+        if (lutApplies) {
+            cProg.setInt("u_lut", 1)
+            cProg.setFloat("u_lut_strength", lutStrength)
+            cProg.setInt("u_lut_enabled", 1)
+            lutDiagPending = false
+        } else {
+            // u_lut must always point to unit 1, not the default 0.
+            // CYCLONE_FRAG declares sampler3D u_lut — leaving it at unit 0 (where the
+            // 2D painterTexture is bound) triggers GL_INVALID_OPERATION at draw time in ES 3.0.
+            cProg.setInt("u_lut", 1)
+            cProg.setInt("u_lut_enabled", 0)
+            lutDiagPending = false
+        }
+        if (paletteMode == PaletteMode.Harmony) {
+            val offsets = harmonyType.hueOffsets()
+            val absOffsets = FloatArray(8) { i ->
+                if (i < offsets.size) wrapHue(harmonyAnchorHue + offsets[i]) else 0f
+            }
+            cProg.setInt("u_harmony_num_offsets", offsets.size)
+            cProg.setFloatArray("u_harmony_offsets", absOffsets)
+            cProg.setFloat("u_harmony_saturation", harmonySaturation)
+            cProg.setFloat("u_harmony_value",      harmonyValue)
+            cProg.setFloat("u_harmony_strength",   harmonyStrength)
+        }
         cProg.setFloat("u_time",              timeSec)
 
         loadShapeMeshIfNeeded()
@@ -860,6 +1162,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glBindVertexArray(0)
 
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        if (lutApplies) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        }
 
         // Depth + cull off — kaleido is a fullscreen quad, ignores depth.
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
@@ -922,13 +1229,105 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
             // Capture one tile per frame for Capture Mosaic (before frame overlay).
             captureController.captureTileIfActive(kaleidoFBO, kaleidoTexW, kaleidoTexH)
 
-            // ── Pass 4: Frame overlay → screen / encoder surface ──────────────
+            // ── Pass 3.5: Chromatic Aberration → chromaAberrationFbo (optional) ──
+            val postChromaTex = if (chromaAberrationEnabled) {
+                val caProg = chromaAberrationProgram
+                if (caProg != null) {
+                    if (chromaAberrationFbo == 0 ||
+                        chromaAberrationFboW != surfaceWidth ||
+                        chromaAberrationFboH != surfaceHeight) {
+                        destroyChromaAberrationFBO()
+                        createChromaAberrationFBO(surfaceWidth, surfaceHeight)
+                    }
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, chromaAberrationFbo)
+                    GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                    GLES30.glDisable(GLES30.GL_BLEND)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+                    caProg.use()
+                    caProg.setInt("u_tex", 0)
+                    caProg.setFloat("u_offset", chromaAberrationIntensity)
+                    caProg.setFloat("u_beat", beatDecay)
+                    caProg.setFloat("u_audio_scale", if (chromaAberrationAudioReact) 0.5f else 0f)
+                    drawQuad()
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                    chromaAberrationTex
+                } else kaleidoTex
+            } else kaleidoTex
+
+            // ── Pass 3.6: Blackhole video-feedback tunnel (optional) ─────────
+            val finalKaleidoTex = if (blackholeEnabled) {
+                val bhProg = blackholeProgram
+                if (bhProg != null) {
+                    if (blackholeFboA == 0 ||
+                        blackholeFboW != surfaceWidth ||
+                        blackholeFboH != surfaceHeight) {
+                        destroyBlackholeFeedbackFBOs()
+                        createBlackholeFeedbackFBOs(surfaceWidth, surfaceHeight)
+                        blackholeReadIsA    = true
+                        blackholeWasEnabled = false
+                    }
+                    if (!blackholeWasEnabled) {
+                        for (fbo in intArrayOf(blackholeFboA, blackholeFboB)) {
+                            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
+                            GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                            GLES30.glClearColor(0f, 0f, 0f, 1f)
+                            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                        }
+                        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                        blackholeWasEnabled = true
+                    }
+                    val readTex  = if (blackholeReadIsA) blackholeTexA else blackholeTexB
+                    val writeFbo = if (blackholeReadIsA) blackholeFboB else blackholeFboA
+                    val writeTex = if (blackholeReadIsA) blackholeTexB else blackholeTexA
+                    val cx = 0.5f + blackholeWanderAmount * Math.sin(timeSec * 0.7 + 1.3).toFloat()
+                    val cy = 0.5f + blackholeWanderAmount * Math.cos(timeSec * 0.5).toFloat()
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, writeFbo)
+                    GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                    GLES30.glDisable(GLES30.GL_BLEND)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, readTex)       // u_prev
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, postChromaTex) // u_scene
+                    bhProg.use()
+                    bhProg.setInt("u_prev",  0)
+                    bhProg.setInt("u_scene", 1)
+                    bhProg.setFloat("u_center_x",     cx)
+                    bhProg.setFloat("u_center_y",     cy)
+                    bhProg.setFloat("u_shrink_rate",  blackholeShrinkRate)
+                    bhProg.setFloat("u_strength",     blackholeStrength)
+                    bhProg.setFloat("u_alpha_radius", blackholeAlphaRadius)
+                    drawQuad()
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                    blackholeReadIsA = !blackholeReadIsA
+                    writeTex
+                } else postChromaTex
+            } else {
+                blackholeWasEnabled = false
+                postChromaTex
+            }
+
+            // ── Pass 4: Frame overlay → lightningFbo (if lightning) else outputFbo ──
+            val lightningReady = lightningEnabled && lightningProgram != null && lightningCompositeProgram != null
+            if (lightningReady) {
+                if (lightningFbo == 0 || lightningFboW != surfaceWidth || lightningFboH != surfaceHeight) {
+                    destroyLightningFBO()
+                    createLightningFBO(surfaceWidth, surfaceHeight)
+                }
+            }
+            val pass4Target = if (lightningReady && lightningFbo != 0) lightningFbo else outputFbo
             val foProg = frameOverlayProgram
             if (foProg != null) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, pass4Target)
                 GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
                 GLES30.glDisable(GLES30.GL_BLEND)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, kaleidoTex)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, finalKaleidoTex)
                 foProg.use()
                 foProg.setInt("u_kaleido_tex", 0)
                 foProg.setVec2("u_resolution", wW, wH)
@@ -942,6 +1341,56 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
                 foProg.setFloat("u_frame_size", 0.52f)
                 drawQuad()
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                if (pass4Target != 0) GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            }
+
+            // ── Pass 5: SNES lightning — 5A bolt at 1/3 res, 5B upscale+composite ─
+            if (lightningReady && lightningFbo != 0 &&
+                lightningFboW == surfaceWidth && lightningFboH == surfaceHeight) {
+
+                val lowW = (surfaceWidth  / 3).coerceAtLeast(1)
+                val lowH = (surfaceHeight / 3).coerceAtLeast(1)
+                if (boltLowFbo == 0 || boltLowFboW != lowW || boltLowFboH != lowH) {
+                    destroyBoltLowFBO()
+                    createBoltLowFBO(lowW, lowH)
+                }
+
+                lightningSystem.update(timeSec, lightningTouchX, lightningTouchY, lightningTouching)
+
+                // 5A: Bolt-only at low resolution (GL_NEAREST gives chunky pixels on upscale)
+                val bProg = lightningProgram!!
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, boltLowFbo)
+                GLES30.glViewport(0, 0, lowW, lowH)
+                GLES30.glClearColor(0f, 0f, 0f, 0f)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                GLES30.glDisable(GLES30.GL_BLEND)
+                bProg.use()
+                bProg.setVec3("u_color", 0.3f, 0.6f, 1.0f)
+                bProg.setFloat("u_aspect", wW / wH)
+                bProg.setInt("u_seg_count", lightningSystem.segCount)
+                bProg.setVec2Array("u_seg_a", lightningSystem.segA)
+                bProg.setVec2Array("u_seg_b", lightningSystem.segB)
+                bProg.setFloatArray("u_seg_w", lightningSystem.segW)
+                drawQuad()
+
+                // 5B: Upscale bolt + additive composite over scene
+                val cProg = lightningCompositeProgram!!
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, outputFbo)
+                GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight)
+                GLES30.glDisable(GLES30.GL_BLEND)
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, lightningTex)   // scene from Pass 4
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, boltLowTex)     // chunky bolt
+                cProg.use()
+                cProg.setInt("u_scene", 0)
+                cProg.setInt("u_bolt",  1)
+                drawQuad()
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                if (outputFbo != 0) GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             }
         }
 
@@ -986,7 +1435,11 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         ribbonProgram?.delete();          ribbonProgram          = null
         blitProgram?.delete();            blitProgram            = null
         frameOverlayProgram?.delete();    frameOverlayProgram    = null
-        distortionPlusProgram?.delete();  distortionPlusProgram  = null
+        distortionPlusProgram?.delete();   distortionPlusProgram   = null
+        chromaAberrationProgram?.delete(); chromaAberrationProgram = null
+        blackholeProgram?.delete();        blackholeProgram        = null
+        lightningProgram?.delete();          lightningProgram          = null
+        lightningCompositeProgram?.delete(); lightningCompositeProgram = null
 
         if (vaoId            != 0) { GLES30.glDeleteVertexArrays(1, intArrayOf(vaoId),            0); vaoId            = 0 }
         if (vboId            != 0) { GLES30.glDeleteBuffers(1,      intArrayOf(vboId),            0); vboId            = 0 }
@@ -1011,13 +1464,59 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         }
         userSkinTextureCache.clear()
 
+        if (lutTextureId != 0) { GLES30.glDeleteTextures(1, intArrayOf(lutTextureId), 0); lutTextureId = 0 }
+
         destroyKaleidoFBO()
         destroyShapeFBO()
         destroyDistortionPlusFBO()
+        destroyChromaAberrationFBO()
+        destroyBlackholeFeedbackFBOs()
+        destroyLightningFBO()
+        destroyBoltLowFBO()
         destroyRibbonFBOs()
         destroyFBO()
 
         Log.d(TAG, "AbstraktRenderer: released all GL resources")
+    }
+
+    fun triggerSuddenWarp() {
+        if (!suddenWarpEnabled) return
+        warpDurationSec = 1.0f + warpRandom.nextFloat() * 2.0f
+        warpSeed        = warpRandom.nextFloat()
+        warpStartSec    = -2f
+    }
+
+    fun applyLut(lut: CubeLut?) {
+        // Called on GL thread via queueEvent
+        Log.d(TAG, "applyLut: ${lut?.name ?: "null"} prevTexId=$lutTextureId")
+        if (lutTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(lutTextureId), 0)
+            lutTextureId = 0
+        }
+        currentLutData = lut
+        if (lut != null) {
+            uploadLutTexture(lut)
+            lutDiagPending = true
+        }
+    }
+
+    private fun uploadLutTexture(lut: CubeLut) {
+        val n = lut.size
+        val buf = ByteBuffer.allocateDirect(n * n * n * 3 * 4)
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        buf.put(lut.data); buf.position(0)
+        val ids = IntArray(1)
+        GLES30.glGenTextures(1, ids, 0)
+        lutTextureId = ids[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
+        GLES30.glTexImage3D(GLES30.GL_TEXTURE_3D, 0, GLES30.GL_RGB16F,
+            n, n, n, 0, GLES30.GL_RGB, GLES30.GL_FLOAT, buf)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_WRAP_R, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
     }
 
     private fun debugPainterStats() {
@@ -1142,6 +1641,27 @@ internal class AbstraktRenderer(private val context: Context) : GLSurfaceView.Re
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         Log.d(TAG, "stampFullSkin: $mode texId=$sTex")
+        return true
+    }
+
+    // Fills the entire painterFBO by blitting imageTexture directly — same blit path as
+    // stampFullSkinIntoPainterFbo, avoids IMAGE shader/uniform issues on cold start.
+    private fun stampFullImageIntoPainterFbo(): Boolean {
+        val bProg = blitProgram ?: run { Log.w(TAG, "stampFullImage SKIP: blitProgram=null"); return false }
+        if (imageTexture == 0) { Log.w(TAG, "stampFullImage SKIP: imageTexture=0"); return false }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, painterFBO)
+        GLES30.glViewport(0, 0, PAINTER_TEX_W, PAINTER_TEX_H)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, imageTexture)
+        bProg.use()
+        bProg.setInt("u_tex", 0)
+        drawQuad()
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return true
     }
 
