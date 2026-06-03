@@ -20,7 +20,7 @@ android {
         applicationId = "com.onojk.abstrakt"
         minSdk = 33
         targetSdk = 36
-        versionCode = 17
+        versionCode = 18
         versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -60,6 +60,10 @@ android {
     }
 }
 
+configurations.all {
+    resolutionStrategy.force("androidx.profileinstaller:profileinstaller:1.4.1")
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -70,10 +74,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.1")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("com.github.skydoves:colorpicker-compose:1.0.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
+    implementation("com.github.skydoves:colorpicker-compose:1.1.4")
     implementation("com.github.wendykierp:JTransforms:3.1")
     implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
     implementation("com.google.firebase:firebase-crashlytics")
