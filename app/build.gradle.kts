@@ -20,7 +20,7 @@ android {
         applicationId = "com.onojk.abstrakt"
         minSdk = 33
         targetSdk = 36
-        versionCode = 16
+        versionCode = 17
         versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -75,9 +75,9 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.github.skydoves:colorpicker-compose:1.0.7")
     implementation("com.github.wendykierp:JTransforms:3.1")
-    implementation(platform("com.google.firebase:firebase-bom:33.8.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
     implementation("com.google.firebase:firebase-crashlytics")
-    implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.android.gms:play-services-ads:25.3.0")
     implementation("com.google.android.ump:user-messaging-platform:4.0.0")
     implementation("com.android.billingclient:billing-ktx:9.0.0")

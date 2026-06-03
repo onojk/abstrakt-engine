@@ -186,15 +186,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val firebaseAnalytics = Firebase.analytics
-        firebaseAnalytics.logEvent(FirebaseAnalytics.Event.APP_OPEN, null)
-        initializeMobileAdsWithConsent()   // consent → SDK init → ad preload
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
-        WindowInsetsControllerCompat(window, window.decorView).let { ctrl ->
-            ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            ctrl.hide(WindowInsetsCompat.Type.systemBars())
-        }
         setContent {
             MyFistAppTheme(darkTheme = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -208,6 +200,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowInsetsControllerCompat(window, window.decorView).let { ctrl ->
+            ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            ctrl.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        val firebaseAnalytics = Firebase.analytics
+        firebaseAnalytics.logEvent(FirebaseAnalytics.Event.APP_OPEN, null)
+        initializeMobileAdsWithConsent()
     }
 
     /**
