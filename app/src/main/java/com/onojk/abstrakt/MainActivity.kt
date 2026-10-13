@@ -2,6 +2,7 @@ package com.onojk.abstrakt
 
 import java.util.Random
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
@@ -647,7 +648,14 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
         if (granted) launchCamera(context) { file, uri ->
             pendingCameraFile = file
             pendingCameraUri  = uri
-            takePictureLauncher.launch(uri)
+            try {
+                takePictureLauncher.launch(uri)
+            } catch (e: ActivityNotFoundException) {
+                Toast.makeText(context, "No camera app available — pick a photo instead", Toast.LENGTH_SHORT).show()
+                pendingCameraFile?.delete()
+                pendingCameraFile = null
+                pendingCameraUri  = null
+            }
         } else {
             Toast.makeText(context, "Camera permission required", Toast.LENGTH_SHORT).show()
         }
@@ -677,7 +685,14 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
             launchCamera(context) { file, uri ->
                 pendingCameraFile = file
                 pendingCameraUri  = uri
-                takePictureLauncher.launch(uri)
+                try {
+                    takePictureLauncher.launch(uri)
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(context, "No camera app available — pick a photo instead", Toast.LENGTH_SHORT).show()
+                    pendingCameraFile?.delete()
+                    pendingCameraFile = null
+                    pendingCameraUri  = null
+                }
             }
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
@@ -685,7 +700,11 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
     }
 
     fun onPickGallery() {
-        photoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+        try {
+            photoPickerLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(context, "No photo picker available on this device", Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun onMicToggle() {
@@ -1019,7 +1038,13 @@ private fun VisualizerScreen(onExportSuccess: () -> Unit = {}) {
                 Spacer(Modifier.height(12.dp))
 
                 Button(
-                    onClick = { audioLauncher.launch(arrayOf("audio/*")) },
+                    onClick = {
+                        try {
+                            audioLauncher.launch(arrayOf("audio/*"))
+                        } catch (e: ActivityNotFoundException) {
+                            Toast.makeText(context, "No file picker available on this device", Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
                 ) {
                     Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
