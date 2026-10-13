@@ -214,12 +214,8 @@ fun ExportWizard(
             pickedAudio     = pickedAudio,
             selectedSource  = selectedAudio,
             isLoadingAudio  = isLoadingAudio,
-            onSelect = { src ->
-                vm.selectAudio(src)
-                if (src == AudioSource.PickNew && pickedAudio == null) {
-                    launchAudioPicker()
-                }
-            },
+            // The "Pick a different song" row launches the picker via onPickNew.
+            onSelect = { src -> vm.selectAudio(src) },
             onPickNew  = { launchAudioPicker() },
             onBack     = { vm.navTo(WizardStep.MODE) },
             onContinue = {
