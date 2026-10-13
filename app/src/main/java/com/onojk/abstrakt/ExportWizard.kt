@@ -1,5 +1,6 @@
 package com.onojk.abstrakt
 
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -133,6 +134,13 @@ fun ExportWizard(
     ) { uri ->
         if (uri != null) vm.loadPickedAudio(uri)
     }
+    fun launchAudioPicker() {
+        try {
+            audioPicker.launch(arrayOf("audio/*"))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(context, "No file picker available on this device", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // ── Out-of-space dialog — floats on top of any step ───────────────────────
     if (showOutOfSpace) {
@@ -209,10 +217,10 @@ fun ExportWizard(
             onSelect = { src ->
                 vm.selectAudio(src)
                 if (src == AudioSource.PickNew && pickedAudio == null) {
-                    audioPicker.launch(arrayOf("audio/*"))
+                    launchAudioPicker()
                 }
             },
-            onPickNew  = { audioPicker.launch(arrayOf("audio/*")) },
+            onPickNew  = { launchAudioPicker() },
             onBack     = { vm.navTo(WizardStep.MODE) },
             onContinue = {
                 vm.navTo(

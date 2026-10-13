@@ -1,6 +1,8 @@
 package com.onojk.abstrakt.visualizers
 
+import android.content.ActivityNotFoundException
 import android.media.MediaPlayer
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -126,7 +128,13 @@ fun WaveformView() {
             Spacer(Modifier.height(16.dp))
 
             Button(
-                onClick = { launcher.launch(arrayOf("audio/*")) },
+                onClick = {
+                    try {
+                        launcher.launch(arrayOf("audio/*"))
+                    } catch (e: ActivityNotFoundException) {
+                        Toast.makeText(context, "No file picker available on this device", Toast.LENGTH_SHORT).show()
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
             ) {
                 Text("Pick audio file", color = Color.Black, fontWeight = FontWeight.Bold)
