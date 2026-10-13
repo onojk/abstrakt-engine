@@ -1,60 +1,92 @@
 #!/usr/bin/env bash
-# Quick dev script for MyFistApp — build / install / run on Pixel 8 emulator
+# Dev script for abstrakt engine — build / install / run the DEBUG build
+# (com.onojk.abstrakt.debug) on a physical device over USB (Galaxy S25 by default).
+# The debug build installs side-by-side with the Play Store release
+# (com.onojk.abstrakt); this script never touches the release package.
+#
+# Target a specific device with: ANDROID_SERIAL=<serial> ./dev.sh <cmd>
 set -euo pipefail
+
+cd "$(dirname "$0")"
 
 ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.config/.android/avd}"
+export ANDROID_SERIAL="${ANDROID_SERIAL:-RFCYA06RMTD}"
 ADB="adb"
 EMULATOR="${ANDROID_HOME}/emulator/emulator"
-AVD="Pixel_8"
-PKG="com.example.myfistapp"
-ACTIVITY=".MainActivity"
+AVD="${AVD:-Pixel_8}"
+PKG="com.onojk.abstrakt.debug"
+# Activity class keeps the base namespace; only the applicationId gets the suffix.
+ACTIVITY="com.onojk.abstrakt.MainActivity"
+APK="app/build/outputs/apk/debug/app-debug.apk"
 
 cmd="${1:-help}"
 
+build()   { ./gradlew assembleDebug; }
+install() { "$ADB" install -r "$APK"; }
+run()     { "$ADB" shell am start -n "$PKG/$ACTIVITY"; }
+
 case "$cmd" in
-  emu)
-    echo "Starting $AVD emulator in background..."
-    ANDROID_AVD_HOME="$ANDROID_AVD_HOME" "$EMULATOR" -avd "$AVD" -no-snapshot-save &
-    echo "Waiting for device..."
-    "$ADB" wait-for-device
-    echo "Emulator ready."
-    ;;
   build)
     echo "Building debug APK..."
-    ./gradlew assembleDebug
+    build
     ;;
   install)
-    echo "Installing APK..."
-    "$ADB" install -r app/build/outputs/apk/debug/app-debug.apk
+    echo "Installing $APK..."
+    install
     ;;
   run)
     echo "Launching $PKG..."
-    "$ADB" shell am start -n "$PKG/$PKG$ACTIVITY"
+    run
     ;;
   bir)
-    echo "==> Build"
-    ./gradlew assembleDebug
-    echo "==> Install"
-    "$ADB" install -r app/build/outputs/apk/debug/app-debug.apk
-    echo "==> Run"
-    "$ADB" shell am start -n "$PKG/$PKG$ACTIVITY"
+    echo "==> Build";   build
+    echo "==> Install"; install
+    echo "==> Run";     run
     ;;
   log)
-    "$ADB" logcat --pid="$("$ADB" shell pidof -s "$PKG")" -v brief
+    pid="$("$ADB" shell pidof -s "$PKG" || true)"
+    if [[ -z "$pid" ]]; then
+      echo "$PKG is not running (try ./dev.sh run first)." >&2
+      exit 1
+    fi
+    "$ADB" logcat --pid="$pid" -v brief
     ;;
   devices)
-    "$ADB" devices
+    "$ADB" devices -l
+    ;;
+  mirror)
+    ver="$(scrcpy --version 2>/dev/null | head -1 | awk '{print $2}')"
+    major="${ver%%.*}"
+    if [[ "${major:-0}" -ge 2 ]]; then
+      rate=(--video-bit-rate 8M)
+    else
+      rate=(--bit-rate 8M)
+    fi
+    scrcpy --serial "$ANDROID_SERIAL" --max-size 1920 --stay-awake "${rate[@]}"
+    ;;
+  uninstall)
+    # Debug package only — never the Play Store release (com.onojk.abstrakt).
+    echo "Uninstalling $PKG..."
+    "$ADB" uninstall "$PKG"
+    ;;
+  emu)
+    # Optional: start an emulator instead of using the phone.
+    # Run other commands with ANDROID_SERIAL=emulator-5554 afterwards.
+    echo "Starting $AVD emulator in background..."
+    ANDROID_AVD_HOME="$ANDROID_AVD_HOME" "$EMULATOR" -avd "$AVD" -no-snapshot-save &
     ;;
   *)
-    echo "Usage: ./dev.sh <command>"
+    echo "Usage: ./dev.sh <command>   (device: $ANDROID_SERIAL)"
     echo ""
-    echo "  emu      Start Pixel 8 emulator"
-    echo "  build    ./gradlew assembleDebug"
-    echo "  install  adb install debug APK"
-    echo "  run      adb shell am start (launch app)"
-    echo "  bir      build + install + run (one shot)"
-    echo "  log      logcat filtered to this app"
-    echo "  devices  adb devices"
+    echo "  build      ./gradlew assembleDebug"
+    echo "  install    adb install -r debug APK"
+    echo "  run        launch $PKG"
+    echo "  bir        build + install + run (one shot)"
+    echo "  log        logcat filtered to the app's pid"
+    echo "  devices    adb devices -l"
+    echo "  mirror     scrcpy screen mirror (1920px, stay awake, 8M bitrate)"
+    echo "  uninstall  remove the debug package only (release is never touched)"
+    echo "  emu        optional: start $AVD emulator"
     ;;
 esac
